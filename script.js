@@ -688,6 +688,8 @@ class CropRotationOptimizer {
             const totalT4 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
             const score = totalT3 * 10 + totalT4 * -5;
             
+            console.log('Base case - T3:', totalT3, 'T4:', totalT4, 'Score:', score, 'Probability:', probability);
+            
             return {
                 expectedScore: score * probability,
                 expectedT3: totalT3 * probability,
@@ -705,9 +707,12 @@ class CropRotationOptimizer {
         const activation = remainingSequence[0];
         const remainingAfter = remainingSequence.slice(1);
         
+        console.log('Processing activation:', activation, 'for plot', activation.plotIndex, 'color', activation.color);
+        
         // Check if this activation is still possible
         const plot = gameState.availablePlots.find(p => p.index === activation.plotIndex);
         if (!plot || !plot.active || plot.usedColors.includes(activation.color)) {
+            console.log('Activation not possible - plot inactive or color used');
             // Activation not possible, skip it
             return this.calculateExpectedOutcome(remainingAfter, gameState, probability);
         }
@@ -716,17 +721,26 @@ class CropRotationOptimizer {
         const successState = this.applyFieldActivation(gameState, activation, true);
         const failureState = this.applyFieldActivation(gameState, activation, false);
         
+        console.log('Success state fields:', successState.plotFields.map(f => ({plot: f.plotIndex, color: f.color, seeds: f.seeds})));
+        console.log('Failure state fields:', failureState.plotFields.map(f => ({plot: f.plotIndex, color: f.color, seeds: f.seeds})));
+        
         const successOutcome = this.calculateExpectedOutcome(remainingAfter, successState, probability * 0.6);
         const failureOutcome = this.calculateExpectedOutcome(remainingAfter, failureState, probability * 0.4);
         
+        console.log('Success outcome:', successOutcome);
+        console.log('Failure outcome:', failureOutcome);
+        
         // Combine outcomes
-        return {
+        const combined = {
             expectedScore: successOutcome.expectedScore + failureOutcome.expectedScore,
             expectedT3: successOutcome.expectedT3 + failureOutcome.expectedT3,
             expectedT4: successOutcome.expectedT4 + failureOutcome.expectedT4,
             probability: probability,
             outcomes: [...successOutcome.outcomes, ...failureOutcome.outcomes]
         };
+        
+        console.log('Combined outcome:', combined);
+        return combined;
     }
 
     upgradeSeeds(colorSeeds) {
