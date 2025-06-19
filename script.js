@@ -218,6 +218,10 @@ class CropRotationOptimizer {
             };
         }
 
+        // 🎯 STRATEGIC PREPROCESSING: Apply bonuses for plots with identical color pairs
+        this.strategicBonuses = new Map();
+        this.preprocessStrategicPairs(availableActivations);
+
         // Find best next activation using configurable computation settings
         let bestActivation = null;
         let bestExpectedScore = -1;
@@ -269,15 +273,20 @@ class CropRotationOptimizer {
                 
                 const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
                 
+                // 🎯 STRATEGIC BONUS: Apply bonus for weaker fields when better alternatives exist
+                const strategicKey = `${firstStep.plotIndex}_${firstStep.fieldIndex}`;
+                const strategicBonus = this.strategicBonuses.get(strategicKey) || 0;
+                const adjustedScore = result.expectedScore + strategicBonus;
+                
                 // Update best score for the first step of this sequence
-                if (scoreData && result.expectedScore > scoreData.bestScore) {
-                    scoreData.bestScore = result.expectedScore;
+                if (scoreData && adjustedScore > scoreData.bestScore) {
+                    scoreData.bestScore = adjustedScore;
                 }
                 scoreData.sequencesEvaluated++;
                 
                 // Track overall best for main recommendation
-                if (result.expectedScore > bestExpectedScore) {
-                    bestExpectedScore = result.expectedScore;
+                if (adjustedScore > bestExpectedScore) {
+                    bestExpectedScore = adjustedScore;
                     bestActivation = sequence[0]; // First step of best sequence
                 }
                 sequencesEvaluated++;
@@ -287,21 +296,24 @@ class CropRotationOptimizer {
             for (const activation of availableActivations) {
                 if (sequencesEvaluated >= this.computationSettings.maxBranchingFactor) break;
                 
-                const sequences = [[activation]]; // Single step sequences
-                for (const sequence of sequences) {
-                    const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
-                    
-                    // Cache the score
-                    const key = `${activation.plotIndex}_${activation.color}_${activation.fieldIndex}`;
-                    const scoreData = activationScores.get(key);
-                    scoreData.bestScore = result.expectedScore;
-                    scoreData.sequencesEvaluated = 1;
-                    
-                    if (result.expectedScore > bestExpectedScore) {
-                        bestExpectedScore = result.expectedScore;
-                        bestActivation = activation;
-                    }
+                const result = this.calculateExpectedOutcome([activation], this.currentGameState, 1.0);
+                
+                // 🎯 STRATEGIC BONUS: Apply bonus for weaker fields when better alternatives exist
+                const strategicKey = `${activation.plotIndex}_${activation.fieldIndex}`;
+                const strategicBonus = this.strategicBonuses.get(strategicKey) || 0;
+                const adjustedScore = result.expectedScore + strategicBonus;
+                
+                // Cache the score
+                const key = `${activation.plotIndex}_${activation.color}_${activation.fieldIndex}`;
+                const scoreData = activationScores.get(key);
+                scoreData.bestScore = adjustedScore;
+                scoreData.sequencesEvaluated = 1;
+                
+                if (adjustedScore > bestExpectedScore) {
+                    bestExpectedScore = adjustedScore;
+                    bestActivation = activation;
                 }
+                
                 sequencesEvaluated++;
             }
         }
@@ -1010,7 +1022,11 @@ class CropRotationOptimizer {
         if (remainingSequence.length === 0) {
             const totalT3 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
             const totalT4 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
-            const score = totalT3 * 10 + totalT4 * -5;
+            
+            // Add potential future value from remaining fields
+            const futureValue = this.calculateFuturePotential(gameState);
+            
+            const score = totalT3 * 10 + totalT4 * -5 + futureValue;
             
             const result = {
                 expectedScore: score * probability,
@@ -1074,39 +1090,17 @@ class CropRotationOptimizer {
         const successState = this.applyFieldActivation(gameState, activation, true);
         const failureState = this.applyFieldActivation(gameState, activation, false);
         
-        // OPPORTUNITY COST FIX: Calculate lost value when plot becomes inactive on failure
-        // Use ORIGINAL game state values, not post-upgrade values from failureState
+        // IMPROVED: Calculate smarter opportunity cost
         let failureOpportunityCost = 0;
         if (!successState.availablePlots.find(p => p.index === activation.plotIndex)?.active) {
             // Plot becomes inactive on success too (both fields used) - no additional cost
         } else if (!failureState.availablePlots.find(p => p.index === activation.plotIndex)?.active) {
-            // Plot becomes inactive only on failure - calculate opportunity cost of lost fields
-            const lostFields = gameState.plotFields.filter(field => 
-                field.plotIndex === activation.plotIndex && 
-                !field.used &&
-                field.fieldIndex !== activation.fieldIndex
+            // Plot becomes inactive only on failure - calculate smart opportunity cost
+            failureOpportunityCost = this.calculateSmartOpportunityCost(
+                gameState, 
+                activation, 
+                failureState
             );
-            
-            // Calculate the expected value of each lost field if it could be activated
-            for (const lostField of lostFields) {
-                // Estimate the value of this field based on potential future activations
-                // This is a simplified estimate - in reality we'd need to simulate all possible futures
-                const t2Value = lostField.seeds[2] * 0.20 * 10; // T2 seeds that could become T3
-                const t3Value = lostField.seeds[3] * 10; // Existing T3 seeds
-                const fieldOpportunityValue = t2Value + t3Value;
-                failureOpportunityCost += fieldOpportunityValue;
-                
-                if (shouldDebug) {
-                    console.log(`    Lost field opportunity cost: Plot ${lostField.plotIndex + 1} ${lostField.color}`);
-                    console.log(`      T2 potential: ${lostField.seeds[2]} * 0.20 * 10 = ${t2Value.toFixed(1)}`);
-                    console.log(`      T3 existing: ${lostField.seeds[3]} * 10 = ${t3Value.toFixed(1)}`);
-                    console.log(`      Total field value: ${fieldOpportunityValue.toFixed(1)}`);
-                }
-            }
-            
-            if (shouldDebug && failureOpportunityCost > 0) {
-                console.log(`    Total failure opportunity cost: ${failureOpportunityCost.toFixed(1)}`);
-            }
         }
         
         const successOutcome = this.calculateExpectedOutcome(remainingAfter, successState, probability * 0.6, debugLevel + 1);
@@ -1123,6 +1117,10 @@ class CropRotationOptimizer {
             probability: probability,
             outcomes: [...successOutcome.outcomes, ...failureOutcome.outcomes]
         };
+        
+        if (shouldDebug && failureOpportunityCost > 0) {
+            console.log(`    Smart opportunity cost: ${failureOpportunityCost.toFixed(1)}`);
+        }
         
         // 🚀 PERFORMANCE OPTIMIZATION: Cache the normalized result (probability = 1.0) for reuse
         this.stateCache.set(cacheKey, {
@@ -1390,10 +1388,22 @@ class CropRotationOptimizer {
                 const key = `${firstStep.plotIndex}_${firstStep.color}_${firstStep.fieldIndex}`;
                 const scoreData = activationScores.get(key);
                 
-                if (scoreData && result.expectedScore > scoreData.bestScore) {
-                    scoreData.bestScore = result.expectedScore;
+                // 🎯 STRATEGIC BONUS: Apply bonus for weaker fields when better alternatives exist
+                const strategicKey = `${firstStep.plotIndex}_${firstStep.fieldIndex}`;
+                const strategicBonus = this.strategicBonuses.get(strategicKey) || 0;
+                const adjustedScore = result.expectedScore + strategicBonus;
+                
+                // Update best score for the first step of this sequence
+                if (scoreData && adjustedScore > scoreData.bestScore) {
+                    scoreData.bestScore = adjustedScore;
                 }
                 scoreData.sequencesEvaluated++;
+                
+                // Track overall best for main recommendation
+                if (adjustedScore > bestExpectedScore) {
+                    bestExpectedScore = adjustedScore;
+                    bestActivation = sequence[0]; // First step of best sequence
+                }
             }
         } else {
             // Single-step evaluation
@@ -1631,6 +1641,139 @@ class CropRotationOptimizer {
         }
         
         return newState;
+    }
+
+    calculateSmartOpportunityCost(originalState, activation, failureState) {
+        const lostFields = originalState.plotFields.filter(field => 
+            field.plotIndex === activation.plotIndex && 
+            !field.used &&
+            field.fieldIndex !== activation.fieldIndex
+        );
+        
+        let totalCost = 0;
+        
+        for (const lostField of lostFields) {
+            // Calculate the MARGINAL value of losing this field
+            const marginalValue = this.calculateMarginalFieldValue(
+                originalState, 
+                lostField, 
+                failureState
+            );
+            totalCost += marginalValue;
+        }
+        
+        return totalCost;
+    }
+
+    calculateMarginalFieldValue(originalState, lostField, failureState) {
+        // Find all remaining fields of the same color
+        const sameColorFields = failureState.plotFields.filter(f => 
+            f.color === lostField.color && 
+            !f.used && 
+            failureState.availablePlots.find(p => p.index === f.plotIndex)?.active
+        );
+        
+        // If there are many alternatives, the loss is less significant
+        const scarcityMultiplier = this.getScarcityMultiplier(sameColorFields.length);
+        
+        // Calculate the field's intrinsic value
+        const fieldValue = lostField.seeds[2] * 0.20 * 10 + // T2→T3 potential
+                          lostField.seeds[3] * 10;           // Existing T3
+        
+        // Consider if this field is particularly good compared to alternatives
+        const qualityBonus = this.calculateQualityBonus(lostField, sameColorFields);
+        
+        return fieldValue * scarcityMultiplier * qualityBonus;
+    }
+
+    getScarcityMultiplier(remainingFieldCount) {
+        // The fewer alternatives, the higher the cost
+        switch (remainingFieldCount) {
+            case 0: return 2.0;    // Last field of this color - very valuable!
+            case 1: return 1.5;    // Only one alternative left
+            case 2: return 1.0;    // Two alternatives
+            case 3: return 0.7;    // Three alternatives
+            default: return 0.5;   // Many alternatives - low marginal cost
+        }
+    }
+
+    calculateQualityBonus(lostField, alternatives) {
+        if (alternatives.length === 0) return 1.0;
+        
+        // Calculate average quality of alternatives
+        const avgAltQuality = alternatives.reduce((sum, f) => 
+            sum + f.seeds[2] + f.seeds[3] * 5, 0
+        ) / alternatives.length;
+        
+        const lostFieldQuality = lostField.seeds[2] + lostField.seeds[3] * 5;
+        
+        // If lost field is much better than alternatives, higher penalty
+        if (lostFieldQuality > avgAltQuality * 1.5) return 1.5;
+        if (lostFieldQuality > avgAltQuality * 1.2) return 1.2;
+        return 1.0;
+    }
+
+    calculateFuturePotential(gameState) {
+        // Estimate the value of remaining unused fields
+        let potential = 0;
+        
+        const activeFields = gameState.plotFields.filter(f => {
+            const plot = gameState.availablePlots.find(p => p.index === f.plotIndex);
+            return !f.used && plot?.active;
+        });
+        
+        for (const field of activeFields) {
+            // Conservative estimate of future value
+            const t2Potential = field.seeds[2] * 0.15 * 10; // Slightly discounted T2→T3
+            const t1Potential = field.seeds[1] * 0.25 * 0.15 * 10; // Double discounted T1→T2→T3
+            potential += (t2Potential + t1Potential) * 0.5; // 50% activation chance
+        }
+        
+        return potential;
+    }
+
+    preprocessStrategicPairs(availableActivations) {
+        // Group activations by plot color pairs
+        const plotGroups = {};
+        
+        for (const activation of availableActivations) {
+            const plot = this.currentGameState.availablePlots.find(p => p.index === activation.plotIndex);
+            const colorPair = plot.colors.sort().join('-');
+            
+            if (!plotGroups[colorPair]) {
+                plotGroups[colorPair] = [];
+            }
+            plotGroups[colorPair].push(activation);
+        }
+        
+        // Apply strategic bonuses for duplicate color pairs
+        for (const [colorPair, activations] of Object.entries(plotGroups)) {
+            if (activations.length > 2) { // Multiple plots with same colors
+                // Sort by field quality (weakest first)
+                activations.sort((a, b) => {
+                    const fieldA = this.getField(a);
+                    const fieldB = this.getField(b);
+                    return (fieldA.seeds[2] + fieldA.seeds[3] * 5) - 
+                           (fieldB.seeds[2] + fieldB.seeds[3] * 5);
+                });
+                
+                // Boost scores for weaker fields when stronger alternatives exist
+                for (let i = 0; i < activations.length - 1; i++) {
+                    const activation = activations[i];
+                    // Add a strategic bonus for using weaker fields first
+                    this.strategicBonuses.set(
+                        `${activation.plotIndex}_${activation.fieldIndex}`,
+                        5 * (activations.length - i - 1)
+                    );
+                }
+            }
+        }
+    }
+
+    getField(activation) {
+        return this.currentGameState.plotFields.find(f => 
+            f.plotIndex === activation.plotIndex && f.fieldIndex === activation.fieldIndex
+        );
     }
 }
 
