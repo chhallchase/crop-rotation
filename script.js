@@ -11,6 +11,15 @@ class CropRotationOptimizer {
             2: 0.20, // T2 → T3
             3: 0.05  // T3 → T4
         };
+
+        // 🎛️ COMPUTATION SETTINGS - Easy to adjust!
+        this.computationSettings = {
+            lookaheadDepth: 5,           // How many steps ahead to plan (1 = immediate next step only)
+            maxSequenceLength: 3,        // Maximum sequence length to consider
+            maxBranchingFactor: 200,      // Max number of sequences to evaluate per step
+            probabilityThreshold: 0.01,  // Ignore probability branches below this threshold
+            enableDeepSearch: true      // Whether to use more thorough but slower search
+        };
         
         this.initializeUI();
     }
@@ -130,10 +139,11 @@ class CropRotationOptimizer {
         
         for (const plot of this.currentGameState.availablePlots) {
             if (plot.active) {
-                availableActivations.push({ plotIndex: plot.index, color: plot.colors[0] });
-                // Only add second color if it's different from first
-                if (plot.colors[1] !== plot.colors[0]) {
-                    availableActivations.push({ plotIndex: plot.index, color: plot.colors[1] });
+                // Only add colors that haven't been used yet
+                for (const color of plot.colors) {
+                    if (!plot.usedColors.includes(color)) {
+                        availableActivations.push({ plotIndex: plot.index, color: color });
+                    }
                 }
             }
         }
@@ -146,20 +156,46 @@ class CropRotationOptimizer {
             };
         }
 
-        // Find best next activation
+        // Find best next activation using configurable computation settings
         let bestActivation = null;
         let bestExpectedScore = -1;
+        let sequencesEvaluated = 0;
 
-        for (const activation of availableActivations) {
-            const sequences = [[activation]]; // Just look one step ahead for now
+        if (this.computationSettings.enableDeepSearch) {
+            // More thorough search: generate sequences of different lengths
+            const sequences = this.generateLookaheadSequences(
+                availableActivations, 
+                this.computationSettings.lookaheadDepth
+            );
+            
             for (const sequence of sequences) {
+                if (sequencesEvaluated >= this.computationSettings.maxBranchingFactor) break;
+                
                 const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
                 if (result.expectedScore > bestExpectedScore) {
                     bestExpectedScore = result.expectedScore;
-                    bestActivation = activation;
+                    bestActivation = sequence[0]; // First step of best sequence
                 }
+                sequencesEvaluated++;
+            }
+        } else {
+            // Fast search: evaluate each activation individually
+            for (const activation of availableActivations) {
+                if (sequencesEvaluated >= this.computationSettings.maxBranchingFactor) break;
+                
+                const sequences = [[activation]]; // Single step sequences
+                for (const sequence of sequences) {
+                    const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
+                    if (result.expectedScore > bestExpectedScore) {
+                        bestExpectedScore = result.expectedScore;
+                        bestActivation = activation;
+                    }
+                }
+                sequencesEvaluated++;
             }
         }
+
+        console.log(`Evaluated ${sequencesEvaluated} sequences for next step optimization`);
 
         return {
             isComplete: false,
@@ -167,8 +203,48 @@ class CropRotationOptimizer {
             currentState: this.currentGameState,
             history: this.activationHistory,
             availableActivations: availableActivations,
-            expectedScore: bestExpectedScore
+            expectedScore: bestExpectedScore,
+            computationInfo: {
+                sequencesEvaluated: sequencesEvaluated,
+                lookaheadDepth: this.computationSettings.lookaheadDepth,
+                deepSearch: this.computationSettings.enableDeepSearch
+            }
         };
+    }
+
+    generateLookaheadSequences(availableActivations, maxDepth) {
+        const sequences = [];
+        
+        // Generate sequences of different lengths up to maxDepth
+        for (let depth = 1; depth <= maxDepth; depth++) {
+            this.generateSequencesRecursive(availableActivations, depth, [], sequences);
+            
+            // Limit total sequences to prevent performance issues
+            if (sequences.length >= this.computationSettings.maxBranchingFactor) {
+                break;
+            }
+        }
+        
+        return sequences.slice(0, this.computationSettings.maxBranchingFactor);
+    }
+
+    generateSequencesRecursive(availableActivations, remainingDepth, currentSequence, allSequences) {
+        if (remainingDepth === 0) {
+            allSequences.push([...currentSequence]);
+            return;
+        }
+        
+        for (const activation of availableActivations) {
+            // Avoid using the same plot twice in a row (basic optimization)
+            const lastActivation = currentSequence[currentSequence.length - 1];
+            if (lastActivation && lastActivation.plotIndex === activation.plotIndex) {
+                continue;
+            }
+            
+            currentSequence.push(activation);
+            this.generateSequencesRecursive(availableActivations, remainingDepth - 1, currentSequence, allSequences);
+            currentSequence.pop();
+        }
     }
 
     processUserInput(success) {
@@ -348,7 +424,8 @@ class CropRotationOptimizer {
             availablePlots: this.plots.map((plot, index) => ({ 
                 index, 
                 colors: [plot.color1, plot.color2],
-                active: true 
+                active: true,
+                usedColors: [] // Track which colors in this plot have been used
             })),
             seedCounts: seedCounts
         };
@@ -405,7 +482,11 @@ class CropRotationOptimizer {
     applyPlotActivation(gameState, activation, success) {
         // Create a deep copy of the game state
         const newState = {
-            availablePlots: gameState.availablePlots.map(p => ({ ...p, colors: [...p.colors] })),
+            availablePlots: gameState.availablePlots.map(p => ({ 
+                ...p, 
+                colors: [...p.colors],
+                usedColors: [...p.usedColors]
+            })),
             seedCounts: {}
         };
         
@@ -427,10 +508,18 @@ class CropRotationOptimizer {
         
         // Handle plot survival based on success/failure
         if (success) {
-            // 60% success: plot survives but mark as used for this sequence
-            activatedPlot.active = false;
+            // 60% success: mark this specific color as used
+            activatedPlot.usedColors.push(activatedColor);
+            
+            // If all colors in this plot are used, mark plot as inactive
+            const unusedColors = activatedPlot.colors.filter(color => 
+                !activatedPlot.usedColors.includes(color)
+            );
+            if (unusedColors.length === 0) {
+                activatedPlot.active = false;
+            }
         } else {
-            // 40% failure: plot colors cancel each other, plot becomes unavailable
+            // 40% failure: plot colors cancel each other, entire plot becomes unavailable
             activatedPlot.active = false;
         }
         
