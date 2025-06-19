@@ -286,10 +286,21 @@ class CropRotationOptimizer {
         const activatedColor = activation.color;
         const isSuccess = this.pendingActivationResult?.success ?? true;
         
-        // Find all fields that will be upgraded (all fields with different colors than activated)
-        const fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
-            field.color !== activatedColor && !field.used
-        );
+        // Find all fields that will be upgraded
+        let fieldsToUpgrade;
+        if (isSuccess) {
+            // Success: Upgrade all fields with different colors (including same plot)
+            fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
+                field.color !== activatedColor && !field.used
+            );
+        } else {
+            // Failure: Upgrade all fields with different colors, EXCEPT those in the same plot
+            fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
+                field.color !== activatedColor && 
+                !field.used && 
+                field.plotIndex !== activation.plotIndex
+            );
+        }
         
         let html = `
             <div class="upgrade-input-form" style="background: rgba(76, 205, 196, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -303,7 +314,7 @@ class CropRotationOptimizer {
                 <p style="margin-bottom: 20px; color: #b0b0b0;">
                     ${isSuccess 
                         ? 'All non-activated color fields get upgraded, and you can activate the other field in this plot later.'
-                        : 'All non-activated color fields still get upgraded, but this plot becomes unavailable for future activations.'
+                        : 'All non-activated color fields in OTHER plots get upgraded. This entire plot becomes unavailable.'
                     }
                 </p>
                 <p style="margin-bottom: 20px; color: #b0b0b0;">
@@ -320,20 +331,24 @@ class CropRotationOptimizer {
                         Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]} Field
                     </h5>
                     <div style="font-size: 0.9rem; color: #888; margin-bottom: 10px;">
-                        Current: ${field.seeds[1]} T1, ${field.seeds[2]} T2, ${field.seeds[3]} T3, ${field.seeds[4]} T4
+                        Before: ${field.seeds[1]} T1, ${field.seeds[2]} T2, ${field.seeds[3]} T3, ${field.seeds[4]} T4
                     </div>
-                    <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;">
                         <div>
-                            <label style="font-size: 0.8rem;">T1→T2:</label>
-                            <input type="number" id="upgrade_field_${index}_1to2" min="0" max="${field.seeds[1]}" value="${Math.round(field.seeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
+                            <label style="font-size: 0.8rem;">New T1 Total:</label>
+                            <input type="number" id="upgrade_field_${index}_t1" min="0" value="${field.seeds[1] - Math.round(field.seeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
                         </div>
                         <div>
-                            <label style="font-size: 0.8rem;">T2→T3:</label>
-                            <input type="number" id="upgrade_field_${index}_2to3" min="0" max="${field.seeds[2]}" value="${Math.round(field.seeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
+                            <label style="font-size: 0.8rem;">New T2 Total:</label>
+                            <input type="number" id="upgrade_field_${index}_t2" min="0" value="${field.seeds[2] + Math.round(field.seeds[1] * 0.25) - Math.round(field.seeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
                         </div>
                         <div>
-                            <label style="font-size: 0.8rem;">T3→T4:</label>
-                            <input type="number" id="upgrade_field_${index}_3to4" min="0" max="${field.seeds[3]}" value="${Math.round(field.seeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
+                            <label style="font-size: 0.8rem;">New T3 Total:</label>
+                            <input type="number" id="upgrade_field_${index}_t3" min="0" value="${field.seeds[3] + Math.round(field.seeds[2] * 0.20) - Math.round(field.seeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem;">New T4 Total:</label>
+                            <input type="number" id="upgrade_field_${index}_t4" min="0" value="${field.seeds[4] + Math.round(field.seeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
                         </div>
                     </div>
                 </div>
@@ -372,14 +387,16 @@ class CropRotationOptimizer {
         const fieldUpgrades = {};
         fieldsToUpgrade.forEach((field, index) => {
             const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
-            const t1to2 = parseInt(document.getElementById(`upgrade_field_${index}_1to2`).value) || 0;
-            const t2to3 = parseInt(document.getElementById(`upgrade_field_${index}_2to3`).value) || 0;
-            const t3to4 = parseInt(document.getElementById(`upgrade_field_${index}_3to4`).value) || 0;
+            const t1 = parseInt(document.getElementById(`upgrade_field_${index}_t1`).value) || 0;
+            const t2 = parseInt(document.getElementById(`upgrade_field_${index}_t2`).value) || 0;
+            const t3 = parseInt(document.getElementById(`upgrade_field_${index}_t3`).value) || 0;
+            const t4 = parseInt(document.getElementById(`upgrade_field_${index}_t4`).value) || 0;
             
             fieldUpgrades[fieldKey] = {
-                t1to2: t1to2,
-                t2to3: t2to3,
-                t3to4: t3to4
+                t1: t1,
+                t2: t2,
+                t3: t3,
+                t4: t4
             };
         });
 
@@ -431,10 +448,21 @@ class CropRotationOptimizer {
         // ALWAYS mark this color as used (regardless of success/failure)
         activatedPlot.usedColors.push(activatedColor);
         
-        // ALWAYS apply upgrades to all fields with different colors (regardless of success/failure)
-        const fieldsToUpgrade = newState.plotFields.filter(field => 
-            field.color !== activatedColor && !field.used
-        );
+        // Apply upgrades to fields based on success/failure
+        let fieldsToUpgrade;
+        if (success) {
+            // Success: Upgrade all fields with different colors (including same plot)
+            fieldsToUpgrade = newState.plotFields.filter(field => 
+                field.color !== activatedColor && !field.used
+            );
+        } else {
+            // Failure: Upgrade all fields with different colors, EXCEPT those in the same plot
+            fieldsToUpgrade = newState.plotFields.filter(field => 
+                field.color !== activatedColor && 
+                !field.used && 
+                field.plotIndex !== activation.plotIndex
+            );
+        }
         
         // Apply upgrades to each field
         fieldsToUpgrade.forEach((field, index) => {
@@ -443,10 +471,11 @@ class CropRotationOptimizer {
                 const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
                 const upgrades = actualUpgrades[fieldKey];
                 if (upgrades) {
-                    field.seeds[1] -= upgrades.t1to2;
-                    field.seeds[2] += upgrades.t1to2 - upgrades.t2to3;
-                    field.seeds[3] += upgrades.t2to3 - upgrades.t3to4;
-                    field.seeds[4] += upgrades.t3to4;
+                    // Set the new totals directly
+                    field.seeds[1] = upgrades.t1;
+                    field.seeds[2] = upgrades.t2;
+                    field.seeds[3] = upgrades.t3;
+                    field.seeds[4] = upgrades.t4;
                     
                     // Ensure no negative values
                     for (let tier = 1; tier <= 4; tier++) {
