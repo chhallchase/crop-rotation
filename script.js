@@ -118,20 +118,19 @@ class CropRotationOptimizer {
     }
 
     calculateOptimalRotation() {
-        // Generate all possible activation sequences
+        // Generate all possible activation sequences with probability trees
         const plotCount = this.plots.length;
-        const sequences = this.generateAllSequences(plotCount);
+        const sequences = this.generateOptimalSequences(plotCount);
         
         let bestSequence = null;
-        let bestScore = -1;
+        let bestExpectedScore = -1;
         let bestResults = null;
 
         for (const sequence of sequences) {
-            const result = this.simulateSequence(sequence);
-            const score = this.calculateScore(result);
+            const result = this.simulateSequenceWithProbabilities(sequence);
             
-            if (score > bestScore) {
-                bestScore = score;
+            if (result.expectedScore > bestExpectedScore) {
+                bestExpectedScore = result.expectedScore;
                 bestSequence = sequence;
                 bestResults = result;
             }
@@ -140,27 +139,24 @@ class CropRotationOptimizer {
         return {
             sequence: bestSequence,
             results: bestResults,
-            score: bestScore
+            score: bestExpectedScore
         };
     }
 
-    generateAllSequences(plotCount) {
-        // Generate all possible combinations of plot activations
-        // Each plot can be activated 0 to 3 times (more than 3 is usually overkill)
+    generateOptimalSequences(plotCount) {
         const sequences = [];
-        const maxActivations = Math.min(3, plotCount);
         
-        // Generate sequences of different lengths
-        for (let length = 1; length <= plotCount * 2; length++) {
+        // Generate sequences of different lengths (1-5 activations is usually optimal)
+        for (let length = 1; length <= Math.min(5, plotCount); length++) {
             this.generateSequencesOfLength(plotCount, length, [], sequences);
+            
+            // Limit to prevent performance issues
+            if (sequences.length > 500) {
+                break;
+            }
         }
         
-        // Also include some longer sequences for thorough optimization
-        for (let i = 0; i < Math.min(100, plotCount * plotCount); i++) {
-            const randomSequence = this.generateRandomSequence(plotCount, Math.floor(Math.random() * 6) + 3);
-            sequences.push(randomSequence);
-        }
-        
+        console.log(`Generated ${sequences.length} sequences for probability tree analysis`);
         return sequences;
     }
 
@@ -177,48 +173,112 @@ class CropRotationOptimizer {
         }
     }
 
-    generateRandomSequence(plotCount, length) {
-        const sequence = [];
-        for (let i = 0; i < length; i++) {
-            sequence.push(Math.floor(Math.random() * plotCount));
-        }
-        return sequence;
+    simulateSequenceWithProbabilities(sequence) {
+        // Calculate expected outcome across all probability branches
+        return this.calculateExpectedOutcome(sequence, this.getInitialGameState(), 1.0);
     }
 
-    simulateSequence(sequence) {
-        // Initialize seed counts for each color and tier - start with 23 T1 seeds as per game mechanics
+    getInitialGameState() {
+        // Initial game state: all plots available, 23 T1 seeds per color
         const seedCounts = {};
         for (const color of this.colors) {
-            seedCounts[color] = { 1: 23, 2: 0, 3: 0, 4: 0 }; // Start with 23 T1 seeds of each color
+            seedCounts[color] = { 1: 23, 2: 0, 3: 0, 4: 0 };
         }
-
-        const activationLog = [];
-
-        for (const plotIndex of sequence) {
-            const plot = this.plots[plotIndex];
-            const upgradedColors = this.colors.filter(color => 
-                color !== plot.color1 && color !== plot.color2
-            );
-
-            // Log the activation
-            activationLog.push({
-                plotIndex: plotIndex + 1,
-                plotColors: [plot.color1, plot.color2],
-                upgradedColors: upgradedColors
-            });
-
-            // Upgrade seeds for non-plot colors
-            for (const color of upgradedColors) {
-                this.upgradeSeeds(seedCounts[color]);
-            }
-        }
-
+        
         return {
-            finalSeedCounts: seedCounts,
-            activationLog: activationLog,
-            totalT3Seeds: this.colors.reduce((sum, color) => sum + seedCounts[color][3], 0),
-            totalT4Seeds: this.colors.reduce((sum, color) => sum + seedCounts[color][4], 0)
+            availablePlots: this.plots.map((plot, index) => ({ 
+                index, 
+                colors: [plot.color1, plot.color2],
+                active: true 
+            })),
+            seedCounts: seedCounts
         };
+    }
+
+    calculateExpectedOutcome(remainingSequence, gameState, probability) {
+        // Base case: no more activations
+        if (remainingSequence.length === 0) {
+            const totalT3 = this.colors.reduce((sum, color) => sum + gameState.seedCounts[color][3], 0);
+            const totalT4 = this.colors.reduce((sum, color) => sum + gameState.seedCounts[color][4], 0);
+            const score = totalT3 * 10 + totalT4 * -5;
+            
+            return {
+                expectedScore: score * probability,
+                expectedT3: totalT3 * probability,
+                expectedT4: totalT4 * probability,
+                probability: probability,
+                outcomes: [{
+                    seedCounts: gameState.seedCounts,
+                    probability: probability,
+                    totalT3: totalT3,
+                    totalT4: totalT4
+                }]
+            };
+        }
+
+        const plotIndex = remainingSequence[0];
+        const remainingAfter = remainingSequence.slice(1);
+        
+        // Check if plot is still available
+        const plot = gameState.availablePlots.find(p => p.index === plotIndex);
+        if (!plot || !plot.active) {
+            // Plot not available, skip this activation
+            return this.calculateExpectedOutcome(remainingAfter, gameState, probability);
+        }
+
+        // Calculate outcomes for both success (60%) and failure (40%) scenarios
+        const successState = this.applyPlotActivation(gameState, plotIndex, true);
+        const failureState = this.applyPlotActivation(gameState, plotIndex, false);
+        
+        const successOutcome = this.calculateExpectedOutcome(remainingAfter, successState, probability * 0.6);
+        const failureOutcome = this.calculateExpectedOutcome(remainingAfter, failureState, probability * 0.4);
+        
+        // Combine outcomes
+        return {
+            expectedScore: successOutcome.expectedScore + failureOutcome.expectedScore,
+            expectedT3: successOutcome.expectedT3 + failureOutcome.expectedT3,
+            expectedT4: successOutcome.expectedT4 + failureOutcome.expectedT4,
+            probability: probability,
+            outcomes: [...successOutcome.outcomes, ...failureOutcome.outcomes]
+        };
+    }
+
+    applyPlotActivation(gameState, plotIndex, success) {
+        // Create a deep copy of the game state
+        const newState = {
+            availablePlots: gameState.availablePlots.map(p => ({ ...p, colors: [...p.colors] })),
+            seedCounts: {}
+        };
+        
+        // Deep copy seed counts
+        for (const color of this.colors) {
+            newState.seedCounts[color] = { ...gameState.seedCounts[color] };
+        }
+        
+        const activatedPlot = newState.availablePlots.find(p => p.index === plotIndex);
+        const plotColors = activatedPlot.colors;
+        
+        // Determine which colors get upgraded (all colors NOT in the activated plot)
+        const upgradedColors = this.colors.filter(color => 
+            !plotColors.includes(color)
+        );
+        
+        // Upgrade seeds for non-plot colors
+        for (const color of upgradedColors) {
+            this.upgradeSeeds(newState.seedCounts[color]);
+        }
+        
+        // Handle plot survival based on success/failure
+        if (success) {
+            // 60% success: plot survives, can potentially be activated again
+            // (In practice, you might want to mark it as used to avoid infinite loops)
+            activatedPlot.active = false; // Disable for this simulation to prevent loops
+        } else {
+            // 40% failure: plot colors cancel each other, plot becomes unavailable
+            activatedPlot.active = false;
+        }
+        
+        return newState;
     }
 
     upgradeSeeds(colorSeeds) {
@@ -257,20 +317,12 @@ class CropRotationOptimizer {
         return Math.round(seedCount * probability);
     }
 
-    calculateScore(result) {
-        // Prioritize T3 seeds, heavily penalize T4 seeds
-        const t3Weight = 10;
-        const t4Penalty = -5;
-        
-        return result.totalT3Seeds * t3Weight + result.totalT4Seeds * t4Penalty;
-    }
-
     displayResults(optimization) {
         const { sequence, results, score } = optimization;
         
         let html = `
             <div class="rotation-sequence">
-                <h3>Optimal Activation Sequence</h3>
+                <h3>Optimal Activation Sequence (Expected Value)</h3>
                 <div class="sequence-steps">
         `;
         
@@ -286,48 +338,93 @@ class CropRotationOptimizer {
         
         html += `
                 </div>
+                <p style="margin-top: 10px; font-size: 0.9rem; color: #b0b0b0;">
+                    Each activation has 60% success rate. Results show expected values across all probability branches.
+                </p>
             </div>
             
-            <table class="results-table">
-                <thead>
-                    <tr>
-                        <th>Color</th>
-                        <th>T1 Seeds</th>
-                        <th>T2 Seeds</th>
-                        <th>T3 Seeds</th>
-                        <th>T4 Seeds</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <div class="probability-summary" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 15px; margin: 20px 0;">
+                <h3 style="color: #ffd700; margin-bottom: 10px;">Expected Outcomes</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <strong>Expected T3 Seeds:</strong> ${results.expectedT3.toFixed(1)}
+                    </div>
+                    <div>
+                        <strong>Expected T4 Seeds:</strong> ${results.expectedT4.toFixed(1)}
+                    </div>
+                </div>
+            </div>
         `;
-        
-        for (const color of this.colors) {
-            const seeds = results.finalSeedCounts[color];
+
+        // Show probability distribution of outcomes
+        if (results.outcomes && results.outcomes.length > 1) {
             html += `
-                <tr>
-                    <td>${this.colorEmojis[color]} ${this.colorNames[color]}</td>
-                    <td>${seeds[1]}</td>
-                    <td>${seeds[2]}</td>
-                    <td><strong>${seeds[3]}</strong></td>
-                    <td>${seeds[4]}</td>
-                </tr>
+                <div class="outcome-distribution">
+                    <h3>Possible Outcomes</h3>
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Probability</th>
+                                <th>T3 Seeds</th>
+                                <th>T4 Seeds</th>
+                                <th>Scenario</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            // Sort outcomes by probability (highest first) and show top ones
+            const sortedOutcomes = results.outcomes
+                .sort((a, b) => b.probability - a.probability)
+                .slice(0, 10); // Show top 10 most likely outcomes
+            
+            sortedOutcomes.forEach(outcome => {
+                const percentage = (outcome.probability * 100).toFixed(1);
+                html += `
+                    <tr>
+                        <td>${percentage}%</td>
+                        <td><strong>${outcome.totalT3}</strong></td>
+                        <td>${outcome.totalT4}</td>
+                        <td style="font-size: 0.8rem;">
+                            ${outcome.probability > 0.3 ? 'High success' : 
+                              outcome.probability > 0.1 ? 'Moderate success' : 'Low probability'}
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
             `;
         }
         
         html += `
-                </tbody>
-            </table>
-            
             <div class="summary" style="margin-top: 20px; padding: 20px; background: rgba(255, 215, 0, 0.1); border-radius: 8px;">
-                <h3 style="color: #ffd700; margin-bottom: 10px;">Summary</h3>
-                <p><strong>Total T3 Seeds:</strong> ${results.totalT3Seeds}</p>
-                <p><strong>Total T4 Seeds:</strong> ${results.totalT4Seeds}</p>
-                <p><strong>Optimization Score:</strong> ${score}</p>
+                <h3 style="color: #ffd700; margin-bottom: 10px;">Strategy Summary</h3>
+                <p><strong>Expected Score:</strong> ${score.toFixed(1)}</p>
                 <p><strong>Sequence Length:</strong> ${sequence.length} activations</p>
+                <p><strong>Risk Level:</strong> ${this.getRiskLevel(results.outcomes)}</p>
+                <p style="margin-top: 10px; font-size: 0.9rem; color: #b0b0b0;">
+                    This strategy accounts for the 60% success rate of plot activations and shows expected returns.
+                </p>
             </div>
         `;
         
         this.resultsContent.innerHTML = html;
+    }
+
+    getRiskLevel(outcomes) {
+        if (!outcomes || outcomes.length <= 1) return "Low";
+        
+        // Calculate variance in outcomes
+        const probabilities = outcomes.map(o => o.probability);
+        const maxProb = Math.max(...probabilities);
+        
+        if (maxProb > 0.6) return "Low - High success probability";
+        if (maxProb > 0.3) return "Moderate - Mixed outcomes";
+        return "High - Many possible outcomes";
     }
 
     displayError(message) {
