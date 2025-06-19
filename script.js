@@ -269,21 +269,22 @@ class CropRotationOptimizer {
     }
 
     processUserInput(success) {
-        if (!this.currentStep || !this.currentStep.nextActivation) return;
+        // Get the next optimal step to find the current activation
+        const step = this.getNextOptimalStep();
+        if (!step || step.isComplete || !step.nextActivation) return;
 
-        const activation = this.currentStep.nextActivation;
+        const activation = step.nextActivation;
         
-        if (success) {
-            // Success: Show upgrade input form for user to enter actual results
-            this.showUpgradeInputForm(activation);
-        } else {
-            // Failure: Process immediately since plot is destroyed
-            this.completeActivation(activation, false, null);
-        }
+        // Store the success/failure result for later use
+        this.pendingActivationResult = { activation, success };
+        
+        // ALWAYS show upgrade input form since upgrades happen on both success and failure
+        this.showUpgradeInputForm(activation);
     }
 
     showUpgradeInputForm(activation) {
         const activatedColor = activation.color;
+        const isSuccess = this.pendingActivationResult?.success ?? true;
         
         // Find all fields that will be upgraded (all fields with different colors than activated)
         const fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
@@ -292,9 +293,18 @@ class CropRotationOptimizer {
         
         let html = `
             <div class="upgrade-input-form" style="background: rgba(76, 205, 196, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <h4 style="color: #4ecdc4; margin-bottom: 15px;">✅ Activation Successful!</h4>
+                <h4 style="color: ${isSuccess ? '#4ecdc4' : '#ff6b6b'}; margin-bottom: 15px;">
+                    ${isSuccess ? '✅ Activation Successful!' : '❌ Activation Failed!'}
+                </h4>
                 <p style="margin-bottom: 15px;">
-                    <strong>Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong> succeeded!
+                    <strong>Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong> 
+                    ${isSuccess ? 'succeeded' : 'failed'}!
+                </p>
+                <p style="margin-bottom: 20px; color: #b0b0b0;">
+                    ${isSuccess 
+                        ? 'All non-activated color fields get upgraded, and you can activate the other field in this plot later.'
+                        : 'All non-activated color fields still get upgraded, but this plot becomes unavailable for future activations.'
+                    }
                 </p>
                 <p style="margin-bottom: 20px; color: #b0b0b0;">
                     Please enter the actual upgrade results for each affected field:
@@ -350,6 +360,7 @@ class CropRotationOptimizer {
 
     processFieldUpgradeResults(plotIndex, color, fieldCount) {
         const activation = { plotIndex: parseInt(plotIndex), color: color };
+        const success = this.pendingActivationResult?.success ?? true;
         const activatedColor = color;
         
         // Find all fields that were upgraded
@@ -372,12 +383,15 @@ class CropRotationOptimizer {
             };
         });
 
-        this.completeActivation(activation, true, fieldUpgrades);
+        this.completeActivation(activation, success, fieldUpgrades);
+        this.pendingActivationResult = null; // Clear the stored result
     }
 
     useExpectedValues(plotIndex, color) {
         const activation = { plotIndex: parseInt(plotIndex), color: color };
-        this.completeActivation(activation, true);
+        const success = this.pendingActivationResult?.success ?? true;
+        this.completeActivation(activation, success);
+        this.pendingActivationResult = null; // Clear the stored result
     }
 
     completeActivation(activation, success, actualUpgrades = null) {
@@ -414,39 +428,40 @@ class CropRotationOptimizer {
         const activatedColor = activation.color;
         const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
         
-        if (success) {
-            // Mark this color as used in the plot
-            activatedPlot.usedColors.push(activatedColor);
-            
-            // Find all fields that should be upgraded (different color, not used)
-            const fieldsToUpgrade = newState.plotFields.filter(field => 
-                field.color !== activatedColor && !field.used
-            );
-            
-            // Apply upgrades to each field
-            fieldsToUpgrade.forEach((field, index) => {
-                if (actualUpgrades) {
-                    // Use actual upgrade results
-                    const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
-                    const upgrades = actualUpgrades[fieldKey];
-                    if (upgrades) {
-                        field.seeds[1] -= upgrades.t1to2;
-                        field.seeds[2] += upgrades.t1to2 - upgrades.t2to3;
-                        field.seeds[3] += upgrades.t2to3 - upgrades.t3to4;
-                        field.seeds[4] += upgrades.t3to4;
-                        
-                        // Ensure no negative values
-                        for (let tier = 1; tier <= 4; tier++) {
-                            field.seeds[tier] = Math.max(0, field.seeds[tier]);
-                        }
+        // ALWAYS mark this color as used (regardless of success/failure)
+        activatedPlot.usedColors.push(activatedColor);
+        
+        // ALWAYS apply upgrades to all fields with different colors (regardless of success/failure)
+        const fieldsToUpgrade = newState.plotFields.filter(field => 
+            field.color !== activatedColor && !field.used
+        );
+        
+        // Apply upgrades to each field
+        fieldsToUpgrade.forEach((field, index) => {
+            if (actualUpgrades) {
+                // Use actual upgrade results
+                const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
+                const upgrades = actualUpgrades[fieldKey];
+                if (upgrades) {
+                    field.seeds[1] -= upgrades.t1to2;
+                    field.seeds[2] += upgrades.t1to2 - upgrades.t2to3;
+                    field.seeds[3] += upgrades.t2to3 - upgrades.t3to4;
+                    field.seeds[4] += upgrades.t3to4;
+                    
+                    // Ensure no negative values
+                    for (let tier = 1; tier <= 4; tier++) {
+                        field.seeds[tier] = Math.max(0, field.seeds[tier]);
                     }
-                } else {
-                    // Use expected values
-                    this.upgradeSeeds(field.seeds);
                 }
-            });
-            
-            // Check if this plot is fully used
+            } else {
+                // Use expected values
+                this.upgradeSeeds(field.seeds);
+            }
+        });
+        
+        if (success) {
+            // 60% success: Plot stays active, can activate the other color too
+            // Check if this plot is fully used (both colors activated)
             const plotColors = this.plots[activation.plotIndex];
             const allColorsUsed = [plotColors.color1, plotColors.color2].every(color => 
                 activatedPlot.usedColors.includes(color)
@@ -456,7 +471,7 @@ class CropRotationOptimizer {
                 activatedPlot.active = false;
             }
         } else {
-            // 40% failure: entire plot becomes unavailable
+            // 40% failure: Plot becomes unavailable (can't activate the other color)
             activatedPlot.active = false;
         }
         
@@ -857,11 +872,11 @@ class CropRotationOptimizer {
                     </div>
 
                     <div class="action-buttons" style="text-align: center; margin-bottom: 25px;">
-                        <button onclick="optimizer.reportSuccess(${JSON.stringify(activation).replace(/"/g, '&quot;')})" 
+                        <button onclick="optimizer.processUserInput(true)" 
                                 style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
                             ✅ Success (60%)
                         </button>
-                        <button onclick="optimizer.reportFailure(${JSON.stringify(activation).replace(/"/g, '&quot;')})" 
+                        <button onclick="optimizer.processUserInput(false)" 
                                 style="background: #e74c3c; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
                             ❌ Failure (40%)
                         </button>
