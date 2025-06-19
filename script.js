@@ -279,15 +279,115 @@ class CropRotationOptimizer {
 
         const activation = this.currentStep.nextActivation;
         
+        if (success) {
+            // Success: Show upgrade input form for user to enter actual results
+            this.showUpgradeInputForm(activation);
+        } else {
+            // Failure: Process immediately since plot is destroyed
+            this.completeActivation(activation, false, null);
+        }
+    }
+
+    showUpgradeInputForm(activation) {
+        const plot = this.plots[activation.plotIndex];
+        const upgradedColors = this.colors.filter(color => color !== activation.color);
+        
+        let html = `
+            <div class="upgrade-input-form" style="background: rgba(76, 205, 196, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h4 style="color: #4ecdc4; margin-bottom: 15px;">✅ Activation Successful!</h4>
+                <p style="margin-bottom: 15px;">
+                    <strong>Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong> succeeded!
+                </p>
+                <p style="margin-bottom: 20px; color: #b0b0b0;">
+                    Please enter the actual upgrade results for each color:
+                </p>
+                
+                <div class="upgrade-inputs">
+        `;
+
+        upgradedColors.forEach(color => {
+            const currentSeeds = this.currentGameState.seedCounts[color];
+            html += `
+                <div class="color-upgrade-input" style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <h5 style="color: #ffd700; margin-bottom: 10px;">
+                        ${this.colorEmojis[color]} ${this.colorNames[color]}
+                    </h5>
+                    <div style="font-size: 0.9rem; color: #888; margin-bottom: 10px;">
+                        Current: ${currentSeeds[1]} T1, ${currentSeeds[2]} T2, ${currentSeeds[3]} T3, ${currentSeeds[4]} T4
+                    </div>
+                    <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.8rem;">T1→T2:</label>
+                            <input type="number" id="upgrade_${color}_1to2" min="0" max="${currentSeeds[1]}" value="${Math.round(currentSeeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem;">T2→T3:</label>
+                            <input type="number" id="upgrade_${color}_2to3" min="0" max="${currentSeeds[2]}" value="${Math.round(currentSeeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem;">T3→T4:</label>
+                            <input type="number" id="upgrade_${color}_3to4" min="0" max="${currentSeeds[3]}" value="${Math.round(currentSeeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+                </div>
+                <div style="text-align: center; margin-top: 20px;">
+                    <button onclick="optimizer.processUpgradeResults('${activation.plotIndex}', '${activation.color}')" 
+                            style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                        Continue with These Results
+                    </button>
+                    <button onclick="optimizer.useExpectedValues('${activation.plotIndex}', '${activation.color}')" 
+                            style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 12px 24px; border-radius: 8px; margin-left: 10px; cursor: pointer;">
+                        Use Expected Values
+                    </button>
+                </div>
+            </div>
+        `;
+
+        this.resultsContent.innerHTML = html;
+    }
+
+    processUpgradeResults(plotIndex, color) {
+        const activation = { plotIndex: parseInt(plotIndex), color: color };
+        const upgradedColors = this.colors.filter(c => c !== color);
+        
+        // Collect actual upgrade results from form
+        const actualUpgrades = {};
+        for (const upgradedColor of upgradedColors) {
+            const t1to2 = parseInt(document.getElementById(`upgrade_${upgradedColor}_1to2`).value) || 0;
+            const t2to3 = parseInt(document.getElementById(`upgrade_${upgradedColor}_2to3`).value) || 0;
+            const t3to4 = parseInt(document.getElementById(`upgrade_${upgradedColor}_3to4`).value) || 0;
+            
+            actualUpgrades[upgradedColor] = {
+                t1to2: t1to2,
+                t2to3: t2to3,
+                t3to4: t3to4
+            };
+        }
+
+        this.completeActivation(activation, true, actualUpgrades);
+    }
+
+    useExpectedValues(plotIndex, color) {
+        const activation = { plotIndex: parseInt(plotIndex), color: color };
+        this.completeActivation(activation, true, null);
+    }
+
+    completeActivation(activation, success, actualUpgrades) {
         // Record the activation in history
         this.activationHistory.push({
             activation: activation,
             success: success,
+            actualUpgrades: actualUpgrades,
             seedsBefore: JSON.parse(JSON.stringify(this.currentGameState.seedCounts))
         });
 
         // Apply the activation to current state
-        this.currentGameState = this.applyPlotActivation(this.currentGameState, activation, success);
+        this.currentGameState = this.applyPlotActivationWithActuals(this.currentGameState, activation, success, actualUpgrades);
 
         // Get next optimal step
         this.currentStep = this.getNextOptimalStep();
@@ -296,27 +396,81 @@ class CropRotationOptimizer {
         this.displayInteractiveResults();
     }
 
-    undoLastStep() {
-        if (this.activationHistory.length === 0) return;
-
-        // Remove last activation from history
-        const lastAction = this.activationHistory.pop();
+    applyPlotActivationWithActuals(gameState, activation, success, actualUpgrades) {
+        // Create a deep copy of the game state
+        const newState = {
+            availablePlots: gameState.availablePlots.map(p => ({ 
+                ...p, 
+                colors: [...p.colors],
+                usedColorCounts: { ...p.usedColorCounts }
+            })),
+            seedCounts: {}
+        };
         
-        // Restore game state to before last activation
-        this.currentGameState = this.getInitialGameState();
-        
-        // Replay all remaining history
-        for (const historyItem of this.activationHistory) {
-            this.currentGameState = this.applyPlotActivation(
-                this.currentGameState, 
-                historyItem.activation, 
-                historyItem.success
-            );
+        // Deep copy seed counts
+        for (const color of this.colors) {
+            newState.seedCounts[color] = { ...gameState.seedCounts[color] };
         }
-
-        // Recalculate optimal next step
-        this.currentStep = this.getNextOptimalStep();
-        this.displayInteractiveResults();
+        
+        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
+        const activatedColor = activation.color;
+        
+        if (success) {
+            // Determine which colors get upgraded
+            const upgradedColors = this.colors.filter(color => color !== activatedColor);
+            
+            if (actualUpgrades) {
+                // Use actual upgrade results
+                for (const color of upgradedColors) {
+                    const upgrades = actualUpgrades[color];
+                    if (upgrades) {
+                        // Apply actual upgrades
+                        newState.seedCounts[color][1] -= upgrades.t1to2;
+                        newState.seedCounts[color][2] += upgrades.t1to2 - upgrades.t2to3;
+                        newState.seedCounts[color][3] += upgrades.t2to3 - upgrades.t3to4;
+                        newState.seedCounts[color][4] += upgrades.t3to4;
+                        
+                        // Ensure no negative values
+                        for (let tier = 1; tier <= 4; tier++) {
+                            newState.seedCounts[color][tier] = Math.max(0, newState.seedCounts[color][tier]);
+                        }
+                    }
+                }
+            } else {
+                // Use expected values as fallback
+                for (const color of upgradedColors) {
+                    this.upgradeSeeds(newState.seedCounts[color]);
+                }
+            }
+            
+            // Mark color as used in plot
+            activatedPlot.usedColorCounts[activatedColor] = (activatedPlot.usedColorCounts[activatedColor] || 0) + 1;
+            
+            // Check if all color instances in this plot are used
+            const colorCounts = {};
+            activatedPlot.colors.forEach(color => {
+                colorCounts[color] = (colorCounts[color] || 0) + 1;
+            });
+            
+            let allColorsUsed = true;
+            for (const color of Object.keys(colorCounts)) {
+                const totalOfThisColor = colorCounts[color];
+                const usedOfThisColor = activatedPlot.usedColorCounts[color] || 0;
+                if (usedOfThisColor < totalOfThisColor) {
+                    allColorsUsed = false;
+                    break;
+                }
+            }
+            
+            if (allColorsUsed) {
+                activatedPlot.active = false;
+            }
+        } else {
+            // 40% failure: plot colors cancel each other, entire plot becomes unavailable
+            activatedPlot.active = false;
+        }
+        
+        return newState;
     }
 
     displayResults(optimization) {
@@ -583,21 +737,10 @@ class CropRotationOptimizer {
     }
 
     applyUpgradeChance(seedCount, probability) {
-        // Use probabilistic simulation for more realistic results
+        // Use deterministic expected values for consistent optimization results
         if (seedCount === 0) return 0;
         
-        // For small numbers, use binomial distribution simulation
-        if (seedCount <= 10) {
-            let upgraded = 0;
-            for (let i = 0; i < seedCount; i++) {
-                if (Math.random() < probability) {
-                    upgraded++;
-                }
-            }
-            return upgraded;
-        }
-        
-        // For larger numbers, use expected value with rounding
+        // Always use expected value calculation for deterministic results
         return Math.round(seedCount * probability);
     }
 
@@ -672,6 +815,30 @@ class CropRotationOptimizer {
         this.maxBranchingFactorInput.value = this.computationSettings.maxBranchingFactor;
         this.enableDeepSearchInput.checked = this.computationSettings.enableDeepSearch;
         this.probabilityThresholdInput.value = this.computationSettings.probabilityThreshold;
+    }
+
+    undoLastStep() {
+        if (this.activationHistory.length === 0) return;
+
+        // Remove last activation from history
+        const lastAction = this.activationHistory.pop();
+        
+        // Restore game state to before last activation
+        this.currentGameState = this.getInitialGameState();
+        
+        // Replay all remaining history
+        for (const historyItem of this.activationHistory) {
+            this.currentGameState = this.applyPlotActivationWithActuals(
+                this.currentGameState, 
+                historyItem.activation, 
+                historyItem.success,
+                historyItem.actualUpgrades
+            );
+        }
+
+        // Recalculate optimal next step
+        this.currentStep = this.getNextOptimalStep();
+        this.displayInteractiveResults();
     }
 }
 
