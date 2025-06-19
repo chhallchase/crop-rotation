@@ -144,10 +144,17 @@ class CropRotationOptimizer {
     }
 
     calculateOptimalRotation() {
-        // Start the interactive decision tree
-        this.currentGameState = this.getInitialGameState();
-        this.activationHistory = [];
-        return this.getNextOptimalStep();
+        try {
+            // Start the interactive decision tree
+            this.currentGameState = this.getInitialGameState();
+            this.activationHistory = [];
+            return this.getNextOptimalStep();
+        } catch (error) {
+            console.error('Error in calculateOptimalRotation:', error);
+            console.error('Current game state:', this.currentGameState);
+            console.error('Plots configuration:', this.plots);
+            throw new Error(`Optimization failed: ${error.message}. Check console for details.`);
+        }
     }
 
     getNextOptimalStep() {
@@ -493,8 +500,12 @@ class CropRotationOptimizer {
         `;
 
         // Show current seed counts
-        const currentT3 = this.colors.reduce((sum, color) => sum + step.currentState.plotFields.find(f => f.color === color).seeds[3], 0);
-        const currentT4 = this.colors.reduce((sum, color) => sum + step.currentState.plotFields.find(f => f.color === color).seeds[4], 0);
+        const currentT3 = step.currentState.plotFields
+            .filter(field => field.color && field.seeds)
+            .reduce((sum, field) => sum + field.seeds[3], 0);
+        const currentT4 = step.currentState.plotFields
+            .filter(field => field.color && field.seeds)
+            .reduce((sum, field) => sum + field.seeds[4], 0);
 
         html += `
             <div class="current-status" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 15px; margin: 20px 0;">
@@ -604,6 +615,10 @@ class CropRotationOptimizer {
         const plotFields = [];
         
         this.plots.forEach((plot, plotIndex) => {
+            if (!plot.color1 || !plot.color2) {
+                throw new Error(`Plot ${plotIndex + 1} has invalid color configuration`);
+            }
+            
             // Add field for color 1
             plotFields.push({
                 plotIndex: plotIndex,
