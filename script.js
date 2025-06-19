@@ -333,11 +333,7 @@ class CropRotationOptimizer {
                     <div style="font-size: 0.9rem; color: #888; margin-bottom: 10px;">
                         Before: ${field.seeds[1]} T1, ${field.seeds[2]} T2, ${field.seeds[3]} T3, ${field.seeds[4]} T4
                     </div>
-                    <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;">
-                        <div>
-                            <label style="font-size: 0.8rem;">New T1 Total:</label>
-                            <input type="number" id="upgrade_field_${index}_t1" min="0" value="${field.seeds[1] - Math.round(field.seeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
-                        </div>
+                    <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                         <div>
                             <label style="font-size: 0.8rem;">New T2 Total:</label>
                             <input type="number" id="upgrade_field_${index}_t2" min="0" value="${field.seeds[2] + Math.round(field.seeds[1] * 0.25) - Math.round(field.seeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
@@ -387,13 +383,11 @@ class CropRotationOptimizer {
         const fieldUpgrades = {};
         fieldsToUpgrade.forEach((field, index) => {
             const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
-            const t1 = parseInt(document.getElementById(`upgrade_field_${index}_t1`).value) || 0;
             const t2 = parseInt(document.getElementById(`upgrade_field_${index}_t2`).value) || 0;
             const t3 = parseInt(document.getElementById(`upgrade_field_${index}_t3`).value) || 0;
             const t4 = parseInt(document.getElementById(`upgrade_field_${index}_t4`).value) || 0;
             
             fieldUpgrades[fieldKey] = {
-                t1: t1,
                 t2: t2,
                 t3: t3,
                 t4: t4
@@ -445,7 +439,14 @@ class CropRotationOptimizer {
         const activatedColor = activation.color;
         const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
         
-        // ALWAYS mark this color as used (regardless of success/failure)
+        // Find and mark the specific field that was activated as used
+        const activatedField = newState.plotFields.find(f => 
+            f.plotIndex === activation.plotIndex && 
+            f.fieldIndex === activation.fieldIndex
+        );
+        activatedField.used = true;
+        
+        // Also mark this color as used in the plot (for UI display)
         activatedPlot.usedColors.push(activatedColor);
         
         // Apply upgrades to fields based on success/failure
@@ -472,10 +473,12 @@ class CropRotationOptimizer {
                 const upgrades = actualUpgrades[fieldKey];
                 if (upgrades) {
                     // Set the new totals directly
-                    field.seeds[1] = upgrades.t1;
                     field.seeds[2] = upgrades.t2;
                     field.seeds[3] = upgrades.t3;
                     field.seeds[4] = upgrades.t4;
+                    
+                    // Calculate T1 as remaining seeds: 23 - (T2 + T3 + T4)
+                    field.seeds[1] = 23 - (upgrades.t2 + upgrades.t3 + upgrades.t4);
                     
                     // Ensure no negative values
                     for (let tier = 1; tier <= 4; tier++) {
@@ -490,17 +493,15 @@ class CropRotationOptimizer {
         
         if (success) {
             // 60% success: Plot stays active, can activate the other color too
-            // Check if this plot is fully used (both colors activated)
-            const plotColors = this.plots[activation.plotIndex];
-            const allColorsUsed = [plotColors.color1, plotColors.color2].every(color => 
-                activatedPlot.usedColors.includes(color)
-            );
+            // Check if this plot is fully used (both fields activated)
+            const plotFields = newState.plotFields.filter(f => f.plotIndex === activation.plotIndex);
+            const allFieldsUsed = plotFields.every(field => field.used);
             
-            if (allColorsUsed) {
+            if (allFieldsUsed) {
                 activatedPlot.active = false;
             }
         } else {
-            // 40% failure: Plot becomes unavailable (can't activate the other color)
+            // 40% failure: Plot becomes unavailable (can't activate the other field)
             activatedPlot.active = false;
         }
         
@@ -964,13 +965,88 @@ class CropRotationOptimizer {
                         Evaluated ${step.computationInfo.sequencesEvaluated} sequences | 
                         Lookahead: ${step.computationInfo.lookaheadDepth} steps | 
                         Deep Search: ${step.computationInfo.deepSearch ? 'On' : 'Off'}
-                        ${step.expectedScore ? ` | Expected Score: ${step.expectedScore.toFixed(1)}` : ''}
+                        ${step.expectedScore ? ` | <span style="color: #ffd700;">Expected Score: ${step.expectedScore.toFixed(1)}</span>` : ''}
+                        <br><br>
+                        <strong>Alternative Options Analysis:</strong>
+                        <div id="alternativeAnalysis" style="margin-top: 10px; font-size: 0.8rem;">
+                            <button onclick="optimizer.showAlternativeAnalysis()" style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
+                                Show All Option Scores
+                            </button>
+                        </div>
                     </div>
                 `;
             }
 
             html += `</div>`;
         }
+
+        this.resultsContent.innerHTML = html;
+    }
+
+    showAlternativeAnalysis() {
+        // Get current step info
+        const step = this.getNextOptimalStep();
+        if (!step || step.isComplete) return;
+
+        // Calculate expected scores for all available activations
+        const activationScores = [];
+        
+        for (const activation of step.availableActivations) {
+            const result = this.calculateExpectedOutcome([activation], this.currentGameState, 1.0);
+            activationScores.push({
+                activation: activation,
+                expectedScore: result.expectedScore,
+                expectedT3: result.expectedT3,
+                expectedT4: result.expectedT4,
+                plotInfo: `Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}`
+            });
+        }
+        
+        // Sort by expected score (highest first)
+        activationScores.sort((a, b) => b.expectedScore - a.expectedScore);
+
+        let html = `
+            <div style="background: rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h4 style="color: #ffd700; margin-bottom: 15px;">🎯 All Available Activations Ranked</h4>
+                <div style="font-size: 0.9rem; color: #b0b0b0; margin-bottom: 15px;">
+                    Showing expected outcomes for single-step activations:
+                </div>
+        `;
+
+        activationScores.forEach((item, index) => {
+            const isRecommended = index === 0;
+            html += `
+                <div style="background: rgba(255, 255, 255, ${isRecommended ? '0.08' : '0.03'}); border-radius: 6px; padding: 12px; margin-bottom: 8px; ${isRecommended ? 'border-left: 3px solid #ffd700;' : ''}">
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 15px; align-items: center;">
+                        <div>
+                            <strong style="color: ${isRecommended ? '#ffd700' : '#e0e0e0'};">
+                                ${isRecommended ? '👑 ' : ''}${item.plotInfo}
+                            </strong>
+                        </div>
+                        <div style="text-align: center;">
+                            Score: <span style="color: #4ecdc4;">${item.expectedScore.toFixed(1)}</span>
+                        </div>
+                        <div style="text-align: center;">
+                            T3: <span style="color: #ffd700;">${item.expectedT3.toFixed(1)}</span>
+                        </div>
+                        <div style="text-align: center;">
+                            T4: <span style="color: #ff6b6b;">${item.expectedT4.toFixed(1)}</span>
+                        </div>
+                    </div>
+                    ${isRecommended ? '<div style="font-size: 0.8rem; color: #888; margin-top: 5px;">⚡ Currently recommended</div>' : ''}
+                </div>
+            `;
+        });
+
+        html += `
+                <div style="text-align: center; margin-top: 20px;">
+                    <button onclick="optimizer.displayStep(optimizer.getNextOptimalStep())" 
+                            style="background: #6c5ce7; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+                        ← Back to Recommendation
+                    </button>
+                </div>
+            </div>
+        `;
 
         this.resultsContent.innerHTML = html;
     }
