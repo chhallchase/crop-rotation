@@ -99,28 +99,6 @@ class CropRotationOptimizer {
         const siblings = btn.parentElement.querySelectorAll('.color-btn');
         siblings.forEach(sibling => sibling.classList.remove('active'));
         btn.classList.add('active');
-
-        // Validate that both colors are different
-        this.validatePlotColors(plotIndex);
-    }
-
-    validatePlotColors(plotIndex) {
-        const plot = this.plots[plotIndex];
-        if (plot.color1 === plot.color2) {
-            // If colors are the same, automatically change color2 to a different color
-            const availableColors = this.colors.filter(c => c !== plot.color1);
-            plot.color2 = availableColors[0];
-            
-            // Update UI to reflect the change
-            const plotDiv = this.plotsContainer.children[plotIndex];
-            const color2Buttons = plotDiv.querySelectorAll('[data-slot="color2"]');
-            color2Buttons.forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.dataset.color === plot.color2) {
-                    btn.classList.add('active');
-                }
-            });
-        }
     }
 
     async optimizeRotation() {
@@ -208,10 +186,10 @@ class CropRotationOptimizer {
     }
 
     simulateSequence(sequence) {
-        // Initialize seed counts for each color and tier
+        // Initialize seed counts for each color and tier - start with 23 T1 seeds as per game mechanics
         const seedCounts = {};
         for (const color of this.colors) {
-            seedCounts[color] = { 1: 1, 2: 0, 3: 0, 4: 0 }; // Start with 1 T1 seed of each color
+            seedCounts[color] = { 1: 23, 2: 0, 3: 0, 4: 0 }; // Start with 23 T1 seeds of each color
         }
 
         const activationLog = [];
@@ -261,8 +239,22 @@ class CropRotationOptimizer {
     }
 
     applyUpgradeChance(seedCount, probability) {
-        // For optimization, we use expected values rather than random outcomes
-        return Math.floor(seedCount * probability);
+        // Use probabilistic simulation for more realistic results
+        if (seedCount === 0) return 0;
+        
+        // For small numbers, use binomial distribution simulation
+        if (seedCount <= 10) {
+            let upgraded = 0;
+            for (let i = 0; i < seedCount; i++) {
+                if (Math.random() < probability) {
+                    upgraded++;
+                }
+            }
+            return upgraded;
+        }
+        
+        // For larger numbers, use expected value with rounding
+        return Math.round(seedCount * probability);
     }
 
     calculateScore(result) {
