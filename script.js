@@ -370,8 +370,15 @@ class CropRotationOptimizer {
     }
 
     processFieldUpgradeResults(plotIndex, color, fieldCount) {
-        const activation = { plotIndex: parseInt(plotIndex), color: color };
+        // Use the original activation object which has the fieldIndex
+        const activation = this.pendingActivationResult?.activation;
         const success = this.pendingActivationResult?.success ?? true;
+        
+        if (!activation) {
+            console.error('No pending activation result found');
+            return;
+        }
+        
         const activatedColor = color;
         
         // Find all fields that were upgraded
@@ -399,8 +406,15 @@ class CropRotationOptimizer {
     }
 
     useExpectedValues(plotIndex, color) {
-        const activation = { plotIndex: parseInt(plotIndex), color: color };
+        // Use the original activation object which has the fieldIndex
+        const activation = this.pendingActivationResult?.activation;
         const success = this.pendingActivationResult?.success ?? true;
+        
+        if (!activation) {
+            console.error('No pending activation result found');
+            return;
+        }
+        
         this.completeActivation(activation, success);
         this.pendingActivationResult = null; // Clear the stored result
     }
@@ -444,6 +458,20 @@ class CropRotationOptimizer {
             f.plotIndex === activation.plotIndex && 
             f.fieldIndex === activation.fieldIndex
         );
+        
+        if (!activatedField) {
+            console.error('Could not find activated field!');
+            console.error('Looking for: plotIndex =', activation.plotIndex, 'fieldIndex =', activation.fieldIndex);
+            console.error('Available fields:', newState.plotFields.map(f => ({
+                plotIndex: f.plotIndex, 
+                fieldIndex: f.fieldIndex, 
+                color: f.color,
+                used: f.used
+            })));
+            console.error('Full activation object:', activation);
+            throw new Error(`Could not find field at plot ${activation.plotIndex}, field ${activation.fieldIndex}`);
+        }
+        
         activatedField.used = true;
         
         // Also mark this color as used in the plot (for UI display)
