@@ -20,12 +20,12 @@
                     <h2>Harvest Configuration</h2>
                     
                     <div class="form-group">
-                        <label for="plotCount">Number of Plots:</label>
-                        <select id="plotCount">
-                            <option value="3">3 Plots</option>
-                            <option value="4">4 Plots</option>
-                            <option value="5">5 Plots</option>
-                        </select>
+                        <label>Number of Plots:</label>
+                        <div class="plot-count-selector">
+                            <button type="button" class="plot-count-btn" data-count="3">3 Plots</button>
+                            <button type="button" class="plot-count-btn active" data-count="4">4 Plots</button>
+                            <button type="button" class="plot-count-btn" data-count="5">5 Plots</button>
+                        </div>
                     </div>
 
                     <div class="computation-settings" style="background: rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 15px; margin: 20px 0;">

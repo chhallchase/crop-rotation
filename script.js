@@ -27,7 +27,7 @@ class CropRotationOptimizer {
     }
 
     initializeUI() {
-        this.plotCountSelect = document.getElementById('plotCount');
+        this.plotCountButtons = document.querySelectorAll('.plot-count-btn');
         this.plotsContainer = document.getElementById('plotsContainer');
         this.optimizeBtn = document.getElementById('optimizeBtn');
         this.loadingIndicator = document.getElementById('loadingIndicator');
@@ -41,7 +41,11 @@ class CropRotationOptimizer {
         this.probabilityThresholdInput = document.getElementById('probabilityThreshold');
         this.customSettingsDiv = document.getElementById('customSettings');
 
-        this.plotCountSelect.addEventListener('change', () => this.generatePlotConfigs());
+        // Plot count button event handlers
+        this.plotCountButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => this.selectPlotCount(e));
+        });
+        
         this.optimizeBtn.addEventListener('click', () => this.optimizeRotation());
 
         // Computation settings event handlers
@@ -51,15 +55,28 @@ class CropRotationOptimizer {
         this.enableDeepSearchInput.addEventListener('change', () => this.updateComputationSettings());
         this.probabilityThresholdInput.addEventListener('change', () => this.updateComputationSettings());
 
-        // Initialize with 3 plots
+        // Initialize with 4 plots (default active button)
         this.generatePlotConfigs();
         
         // Initialize UI with current settings
         this.syncUIWithSettings();
     }
 
+    selectPlotCount(event) {
+        const btn = event.target;
+        const plotCount = parseInt(btn.dataset.count);
+
+        // Update button states
+        this.plotCountButtons.forEach(button => button.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Generate new plot configs
+        this.currentPlotCount = plotCount;
+        this.generatePlotConfigs();
+    }
+
     generatePlotConfigs() {
-        const plotCount = parseInt(this.plotCountSelect.value);
+        const plotCount = this.currentPlotCount || 4; // Default to 4 plots
         this.plots = [];
         this.plotsContainer.innerHTML = '';
 
