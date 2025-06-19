@@ -1058,12 +1058,13 @@ class CropRotationOptimizer {
         const failureState = this.applyFieldActivation(gameState, activation, false);
         
         // OPPORTUNITY COST FIX: Calculate lost value when plot becomes inactive on failure
+        // Use ORIGINAL game state values, not post-upgrade values from failureState
         let failureOpportunityCost = 0;
         if (!successState.availablePlots.find(p => p.index === activation.plotIndex)?.active) {
             // Plot becomes inactive on success too (both fields used) - no additional cost
         } else if (!failureState.availablePlots.find(p => p.index === activation.plotIndex)?.active) {
             // Plot becomes inactive only on failure - calculate opportunity cost of lost fields
-            const lostFields = failureState.plotFields.filter(field => 
+            const lostFields = gameState.plotFields.filter(field => 
                 field.plotIndex === activation.plotIndex && 
                 !field.used &&
                 field.fieldIndex !== activation.fieldIndex
