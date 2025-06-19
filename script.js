@@ -15,10 +15,9 @@ class CropRotationOptimizer {
         // 🎛️ COMPUTATION SETTINGS - Easy to adjust!
         this.computationSettings = {
             lookaheadDepth: 5,           // How many steps ahead to plan (1 = immediate next step only)
-            maxSequenceLength: 3,        // Maximum sequence length to consider
-            maxBranchingFactor: 2000,      // Max number of sequences to evaluate per step
+            maxBranchingFactor: 2000,    // Max number of sequences to evaluate per step
             probabilityThreshold: 0.01,  // Ignore probability branches below this threshold
-            enableDeepSearch: true      // Whether to use more thorough but slower search
+            enableDeepSearch: true       // Whether to use more thorough but slower search
         };
         
         this.initializeUI();
@@ -31,11 +30,29 @@ class CropRotationOptimizer {
         this.loadingIndicator = document.getElementById('loadingIndicator');
         this.resultsContent = document.getElementById('resultsContent');
 
+        // Computation settings UI elements
+        this.performancePreset = document.getElementById('performancePreset');
+        this.lookaheadDepthInput = document.getElementById('lookaheadDepth');
+        this.maxBranchingFactorInput = document.getElementById('maxBranchingFactor');
+        this.enableDeepSearchInput = document.getElementById('enableDeepSearch');
+        this.probabilityThresholdInput = document.getElementById('probabilityThreshold');
+        this.customSettingsDiv = document.getElementById('customSettings');
+
         this.plotCountSelect.addEventListener('change', () => this.generatePlotConfigs());
         this.optimizeBtn.addEventListener('click', () => this.optimizeRotation());
 
+        // Computation settings event handlers
+        this.performancePreset.addEventListener('change', () => this.handlePresetChange());
+        this.lookaheadDepthInput.addEventListener('change', () => this.updateComputationSettings());
+        this.maxBranchingFactorInput.addEventListener('change', () => this.updateComputationSettings());
+        this.enableDeepSearchInput.addEventListener('change', () => this.updateComputationSettings());
+        this.probabilityThresholdInput.addEventListener('change', () => this.updateComputationSettings());
+
         // Initialize with 3 plots
         this.generatePlotConfigs();
+        
+        // Initialize UI with current settings
+        this.syncUIWithSettings();
     }
 
     generatePlotConfigs() {
@@ -599,6 +616,62 @@ class CropRotationOptimizer {
         if (show) {
             this.resultsContent.innerHTML = '';
         }
+    }
+
+    handlePresetChange() {
+        const preset = this.performancePreset.value;
+        
+        if (preset === 'custom') {
+            this.customSettingsDiv.style.display = 'block';
+            return;
+        }
+
+        // Apply preset values
+        const presets = {
+            fast: {
+                lookaheadDepth: 2,
+                maxBranchingFactor: 20,
+                enableDeepSearch: false,
+                probabilityThreshold: 0.05
+            },
+            balanced: {
+                lookaheadDepth: 3,
+                maxBranchingFactor: 100,
+                enableDeepSearch: true,
+                probabilityThreshold: 0.02
+            },
+            thorough: {
+                lookaheadDepth: 5,
+                maxBranchingFactor: 2000,
+                enableDeepSearch: true,
+                probabilityThreshold: 0.01
+            }
+        };
+
+        if (presets[preset]) {
+            this.computationSettings = { ...this.computationSettings, ...presets[preset] };
+            this.syncUIWithSettings();
+        }
+
+        this.customSettingsDiv.style.display = preset === 'custom' ? 'block' : 'none';
+    }
+
+    updateComputationSettings() {
+        this.computationSettings.lookaheadDepth = parseInt(this.lookaheadDepthInput.value);
+        this.computationSettings.maxBranchingFactor = parseInt(this.maxBranchingFactorInput.value);
+        this.computationSettings.enableDeepSearch = this.enableDeepSearchInput.checked;
+        this.computationSettings.probabilityThreshold = parseFloat(this.probabilityThresholdInput.value);
+        
+        // Switch to custom when user manually changes values
+        this.performancePreset.value = 'custom';
+        this.customSettingsDiv.style.display = 'block';
+    }
+
+    syncUIWithSettings() {
+        this.lookaheadDepthInput.value = this.computationSettings.lookaheadDepth;
+        this.maxBranchingFactorInput.value = this.computationSettings.maxBranchingFactor;
+        this.enableDeepSearchInput.checked = this.computationSettings.enableDeepSearch;
+        this.probabilityThresholdInput.value = this.computationSettings.probabilityThreshold;
     }
 }
 

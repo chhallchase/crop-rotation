@@ -10,7 +10,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🌱 PoE Crop Rotation Optimizer v0.14</h1>
+            <h1>🌱 PoE Crop Rotation Optimizer v0.2</h1>
             <p>Optimize your Path of Exile Harvest crop rotation for maximum T3 seed yield</p>
         </header>
 
@@ -26,6 +26,49 @@
                             <option value="4">4 Plots</option>
                             <option value="5">5 Plots</option>
                         </select>
+                    </div>
+
+                    <div class="computation-settings" style="background: rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 15px; margin: 20px 0;">
+                        <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">⚙️ Computation Settings</h3>
+                        
+                        <div class="form-group">
+                            <label for="performancePreset">Performance Preset:</label>
+                            <select id="performancePreset">
+                                <option value="fast">Fast (< 0.1s)</option>
+                                <option value="balanced">Balanced (< 1s)</option>
+                                <option value="thorough" selected>Thorough (1-5s)</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+
+                        <div id="customSettings" style="display: block;">
+                            <div class="settings-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div class="form-group">
+                                    <label for="lookaheadDepth">Lookahead Depth:</label>
+                                    <input type="number" id="lookaheadDepth" min="1" max="10" value="5">
+                                    <small style="color: #888;">Steps ahead to plan</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="maxBranchingFactor">Max Sequences:</label>
+                                    <input type="number" id="maxBranchingFactor" min="10" max="5000" step="50" value="2000">
+                                    <small style="color: #888;">Sequences to evaluate</small>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="enableDeepSearch" checked>
+                                    Enable Deep Search (slower but smarter)
+                                </label>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="probabilityThreshold">Probability Threshold:</label>
+                                <input type="number" id="probabilityThreshold" min="0.001" max="0.1" step="0.001" value="0.01">
+                                <small style="color: #888;">Ignore branches below this probability</small>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="plotsContainer" class="plots-container">

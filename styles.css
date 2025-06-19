@@ -78,6 +78,19 @@ main {
     color: #d0d0d0;
 }
 
+.form-group label input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    margin-bottom: 0;
+}
+
+.form-group small {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: #888;
+}
+
 select, input {
     width: 100%;
     padding: 12px 16px;
@@ -308,4 +321,22 @@ footer a:hover {
     .info-grid {
         grid-template-columns: 1fr;
     }
+}
+
+.computation-settings {
+    transition: all 0.3s ease;
+}
+
+.computation-settings h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-grid {
+    margin: 15px 0;
+}
+
+input[type="number"] {
+    width: 100%;
 } 
