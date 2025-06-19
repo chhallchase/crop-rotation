@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Do not start localhost python servers. im just running from the provided html
+
+Harvest mechanics:
+In the harvest there are PLOTS and each PLOT contains two FIELDS.
+Fields start with 23 t1 seeds. t1 seeds have a 25% chance to upgrade to t2 seeds. t2 seeds have a 20% chance to upgrade to t3 seeds. t3 seeds have a 5% chance to upgrade to a t4 seed.
+We are optimizing for t3 seeds because they are better than t4 seeds.
+
+Each FIELD is adjacent to eachother and there is a 60% chance when selecting a field to keep the adjacant field. there is a 40% chance to lose the adjacent field.
+
+If a field is selected and the 60% passes, the other field can be activated. if the 60% fails (40% chance of fail) the other field is lost and can no longer be activated.
+
+Every FIELD in the harvest contains a color. 
+
+
+When selecting a FIELD of a specific color, all other FIELDS in the entire harvest of the other 2 colors are upgraded. 
