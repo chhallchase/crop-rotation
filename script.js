@@ -118,64 +118,223 @@ class CropRotationOptimizer {
     }
 
     calculateOptimalRotation() {
-        // Generate all possible activation sequences with probability trees
-        const plotCount = this.plots.length;
-        const sequences = this.generateOptimalSequences(plotCount);
-        
-        let bestSequence = null;
-        let bestExpectedScore = -1;
-        let bestResults = null;
+        // Start the interactive decision tree
+        this.currentGameState = this.getInitialGameState();
+        this.activationHistory = [];
+        return this.getNextOptimalStep();
+    }
 
-        for (const sequence of sequences) {
-            const result = this.simulateSequenceWithProbabilities(sequence);
-            
-            if (result.expectedScore > bestExpectedScore) {
-                bestExpectedScore = result.expectedScore;
-                bestSequence = sequence;
-                bestResults = result;
+    getNextOptimalStep() {
+        // Generate possible next activations from current state
+        const availableActivations = [];
+        
+        for (const plot of this.currentGameState.availablePlots) {
+            if (plot.active) {
+                availableActivations.push({ plotIndex: plot.index, color: plot.colors[0] });
+                // Only add second color if it's different from first
+                if (plot.colors[1] !== plot.colors[0]) {
+                    availableActivations.push({ plotIndex: plot.index, color: plot.colors[1] });
+                }
+            }
+        }
+
+        if (availableActivations.length === 0) {
+            return {
+                isComplete: true,
+                currentState: this.currentGameState,
+                history: this.activationHistory
+            };
+        }
+
+        // Find best next activation
+        let bestActivation = null;
+        let bestExpectedScore = -1;
+
+        for (const activation of availableActivations) {
+            const sequences = [[activation]]; // Just look one step ahead for now
+            for (const sequence of sequences) {
+                const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
+                if (result.expectedScore > bestExpectedScore) {
+                    bestExpectedScore = result.expectedScore;
+                    bestActivation = activation;
+                }
             }
         }
 
         return {
-            sequence: bestSequence,
-            results: bestResults,
-            score: bestExpectedScore
+            isComplete: false,
+            nextActivation: bestActivation,
+            currentState: this.currentGameState,
+            history: this.activationHistory,
+            availableActivations: availableActivations,
+            expectedScore: bestExpectedScore
         };
     }
 
-    generateOptimalSequences(plotCount) {
-        const sequences = [];
+    processUserInput(success) {
+        if (!this.currentStep || !this.currentStep.nextActivation) return;
+
+        const activation = this.currentStep.nextActivation;
         
-        // Generate sequences of different lengths (1-5 activations is usually optimal)
-        for (let length = 1; length <= Math.min(5, plotCount); length++) {
-            this.generateSequencesOfLength(plotCount, length, [], sequences);
-            
-            // Limit to prevent performance issues
-            if (sequences.length > 500) {
-                break;
-            }
-        }
+        // Record the activation in history
+        this.activationHistory.push({
+            activation: activation,
+            success: success,
+            seedsBefore: JSON.parse(JSON.stringify(this.currentGameState.seedCounts))
+        });
+
+        // Apply the activation to current state
+        this.currentGameState = this.applyPlotActivation(this.currentGameState, activation, success);
+
+        // Get next optimal step
+        this.currentStep = this.getNextOptimalStep();
         
-        console.log(`Generated ${sequences.length} sequences for probability tree analysis`);
-        return sequences;
+        // Update display
+        this.displayInteractiveResults();
     }
 
-    generateSequencesOfLength(plotCount, length, current, sequences) {
-        if (current.length === length) {
-            sequences.push([...current]);
-            return;
-        }
+    undoLastStep() {
+        if (this.activationHistory.length === 0) return;
+
+        // Remove last activation from history
+        const lastAction = this.activationHistory.pop();
         
-        for (let plotIndex = 0; plotIndex < plotCount; plotIndex++) {
-            current.push(plotIndex);
-            this.generateSequencesOfLength(plotCount, length, current, sequences);
-            current.pop();
+        // Restore game state to before last activation
+        this.currentGameState = this.getInitialGameState();
+        
+        // Replay all remaining history
+        for (const historyItem of this.activationHistory) {
+            this.currentGameState = this.applyPlotActivation(
+                this.currentGameState, 
+                historyItem.activation, 
+                historyItem.success
+            );
         }
+
+        // Recalculate optimal next step
+        this.currentStep = this.getNextOptimalStep();
+        this.displayInteractiveResults();
     }
 
-    simulateSequenceWithProbabilities(sequence) {
-        // Calculate expected outcome across all probability branches
-        return this.calculateExpectedOutcome(sequence, this.getInitialGameState(), 1.0);
+    displayResults(optimization) {
+        // Store the initial step and display interactive interface
+        this.currentStep = optimization;
+        this.displayInteractiveResults();
+    }
+
+    displayInteractiveResults() {
+        const step = this.currentStep;
+        
+        let html = `
+            <div class="interactive-decision-tree">
+                <h3>🎯 Interactive Decision Tree</h3>
+        `;
+
+        // Show current seed counts
+        const currentT3 = this.colors.reduce((sum, color) => sum + step.currentState.seedCounts[color][3], 0);
+        const currentT4 = this.colors.reduce((sum, color) => sum + step.currentState.seedCounts[color][4], 0);
+
+        html += `
+            <div class="current-status" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 15px; margin: 20px 0;">
+                <h4 style="color: #ffd700; margin-bottom: 10px;">Current Status</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; text-align: center;">
+                    <div><strong>T3 Seeds:</strong> ${currentT3}</div>
+                    <div><strong>T4 Seeds:</strong> ${currentT4}</div>
+                    <div><strong>Steps Taken:</strong> ${this.activationHistory.length}</div>
+                </div>
+            </div>
+        `;
+
+        // Show activation history
+        if (this.activationHistory.length > 0) {
+            html += `
+                <div class="activation-history" style="margin: 20px 0;">
+                    <h4 style="color: #ffd700; margin-bottom: 10px;">Previous Steps:</h4>
+                    <div class="history-steps">
+            `;
+
+            this.activationHistory.forEach((historyItem, index) => {
+                const plot = this.plots[historyItem.activation.plotIndex];
+                const statusColor = historyItem.success ? '#4ecdc4' : '#ff4757';
+                const statusText = historyItem.success ? '✅ Success' : '❌ Failed';
+                
+                html += `
+                    <div class="history-step" style="background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${statusColor};">
+                        <strong>Step ${index + 1}:</strong> Plot ${historyItem.activation.plotIndex + 1} - Activate ${this.colorEmojis[historyItem.activation.color]} ${historyItem.activation.color.charAt(0).toUpperCase() + historyItem.activation.color.slice(1)}
+                        <span style="color: ${statusColor}; margin-left: 10px;">${statusText}</span>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                    <button onclick="optimizer.undoLastStep()" class="btn-secondary" style="margin-top: 10px;">↶ Undo Last Step</button>
+                </div>
+            `;
+        }
+
+        // Show next recommended step or completion
+        if (step.isComplete) {
+            html += `
+                <div class="completion-message" style="background: rgba(76, 205, 196, 0.2); border-radius: 8px; padding: 20px; text-align: center;">
+                    <h4 style="color: #4ecdc4;">🎉 Optimization Complete!</h4>
+                    <p>No more beneficial activations available.</p>
+                    <p><strong>Final T3 Seeds:</strong> ${currentT3} | <strong>Final T4 Seeds:</strong> ${currentT4}</p>
+                </div>
+            `;
+        } else {
+            const activation = step.nextActivation;
+            const plot = this.plots[activation.plotIndex];
+            const upgradedColors = this.colors.filter(c => c !== activation.color);
+
+            html += `
+                <div class="next-step" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <h4 style="color: #ffd700; margin-bottom: 15px;">📍 Recommended Next Step:</h4>
+                    <div class="recommended-action" style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <div style="font-size: 1.1rem; margin-bottom: 8px;">
+                            <strong>Plot ${activation.plotIndex + 1} - Activate ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong>
+                        </div>
+                        <div style="color: #b0b0b0; font-size: 0.9rem;">
+                            Plot contains: ${this.colorEmojis[plot.color1]}/${this.colorEmojis[plot.color2]} • 
+                            Will upgrade: ${upgradedColors.map(c => this.colorEmojis[c] + ' ' + c).join(', ')}
+                        </div>
+                    </div>
+                    
+                    <div class="action-buttons" style="display: flex; gap: 15px; justify-content: center;">
+                        <button onclick="optimizer.processUserInput(true)" class="btn-success" style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                            ✅ Success (60%)
+                        </button>
+                        <button onclick="optimizer.processUserInput(false)" class="btn-failure" style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                            ❌ Failed (40%)
+                        </button>
+                    </div>
+                    
+                    <p style="text-align: center; margin-top: 15px; font-size: 0.9rem; color: #888;">
+                        Try the activation in-game, then click the result above
+                    </p>
+                </div>
+            `;
+        }
+
+        // Add restart button
+        html += `
+            <div style="text-align: center; margin-top: 20px;">
+                <button onclick="optimizer.restartOptimization()" class="btn-secondary" style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+                    🔄 Start Over
+                </button>
+            </div>
+        `;
+
+        html += `</div>`;
+        
+        this.resultsContent.innerHTML = html;
+    }
+
+    restartOptimization() {
+        this.currentGameState = this.getInitialGameState();
+        this.activationHistory = [];
+        this.currentStep = this.getNextOptimalStep();
+        this.displayInteractiveResults();
     }
 
     getInitialGameState() {
@@ -216,19 +375,19 @@ class CropRotationOptimizer {
             };
         }
 
-        const plotIndex = remainingSequence[0];
+        const activation = remainingSequence[0];
         const remainingAfter = remainingSequence.slice(1);
         
         // Check if plot is still available
-        const plot = gameState.availablePlots.find(p => p.index === plotIndex);
+        const plot = gameState.availablePlots.find(p => p.index === activation.plotIndex);
         if (!plot || !plot.active) {
             // Plot not available, skip this activation
             return this.calculateExpectedOutcome(remainingAfter, gameState, probability);
         }
 
         // Calculate outcomes for both success (60%) and failure (40%) scenarios
-        const successState = this.applyPlotActivation(gameState, plotIndex, true);
-        const failureState = this.applyPlotActivation(gameState, plotIndex, false);
+        const successState = this.applyPlotActivation(gameState, activation, true);
+        const failureState = this.applyPlotActivation(gameState, activation, false);
         
         const successOutcome = this.calculateExpectedOutcome(remainingAfter, successState, probability * 0.6);
         const failureOutcome = this.calculateExpectedOutcome(remainingAfter, failureState, probability * 0.4);
@@ -243,7 +402,7 @@ class CropRotationOptimizer {
         };
     }
 
-    applyPlotActivation(gameState, plotIndex, success) {
+    applyPlotActivation(gameState, activation, success) {
         // Create a deep copy of the game state
         const newState = {
             availablePlots: gameState.availablePlots.map(p => ({ ...p, colors: [...p.colors] })),
@@ -255,24 +414,21 @@ class CropRotationOptimizer {
             newState.seedCounts[color] = { ...gameState.seedCounts[color] };
         }
         
-        const activatedPlot = newState.availablePlots.find(p => p.index === plotIndex);
-        const plotColors = activatedPlot.colors;
+        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
+        const activatedColor = activation.color;
         
-        // Determine which colors get upgraded (all colors NOT in the activated plot)
-        const upgradedColors = this.colors.filter(color => 
-            !plotColors.includes(color)
-        );
+        // Determine which colors get upgraded (all colors NOT the activated color)
+        const upgradedColors = this.colors.filter(color => color !== activatedColor);
         
-        // Upgrade seeds for non-plot colors
+        // Upgrade seeds for non-activated colors
         for (const color of upgradedColors) {
             this.upgradeSeeds(newState.seedCounts[color]);
         }
         
         // Handle plot survival based on success/failure
         if (success) {
-            // 60% success: plot survives, can potentially be activated again
-            // (In practice, you might want to mark it as used to avoid infinite loops)
-            activatedPlot.active = false; // Disable for this simulation to prevent loops
+            // 60% success: plot survives but mark as used for this sequence
+            activatedPlot.active = false;
         } else {
             // 40% failure: plot colors cancel each other, plot becomes unavailable
             activatedPlot.active = false;
@@ -317,116 +473,6 @@ class CropRotationOptimizer {
         return Math.round(seedCount * probability);
     }
 
-    displayResults(optimization) {
-        const { sequence, results, score } = optimization;
-        
-        let html = `
-            <div class="rotation-sequence">
-                <h3>Optimal Activation Sequence (Expected Value)</h3>
-                <div class="sequence-steps">
-        `;
-        
-        sequence.forEach((plotIndex, step) => {
-            const plot = this.plots[plotIndex];
-            html += `
-                <div class="step">
-                    Step ${step + 1}: Plot ${plotIndex + 1} 
-                    (${this.colorEmojis[plot.color1]} ${this.colorEmojis[plot.color2]})
-                </div>
-            `;
-        });
-        
-        html += `
-                </div>
-                <p style="margin-top: 10px; font-size: 0.9rem; color: #b0b0b0;">
-                    Each activation has 60% success rate. Results show expected values across all probability branches.
-                </p>
-            </div>
-            
-            <div class="probability-summary" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 15px; margin: 20px 0;">
-                <h3 style="color: #ffd700; margin-bottom: 10px;">Expected Outcomes</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                    <div>
-                        <strong>Expected T3 Seeds:</strong> ${results.expectedT3.toFixed(1)}
-                    </div>
-                    <div>
-                        <strong>Expected T4 Seeds:</strong> ${results.expectedT4.toFixed(1)}
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Show probability distribution of outcomes
-        if (results.outcomes && results.outcomes.length > 1) {
-            html += `
-                <div class="outcome-distribution">
-                    <h3>Possible Outcomes</h3>
-                    <table class="results-table">
-                        <thead>
-                            <tr>
-                                <th>Probability</th>
-                                <th>T3 Seeds</th>
-                                <th>T4 Seeds</th>
-                                <th>Scenario</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-            
-            // Sort outcomes by probability (highest first) and show top ones
-            const sortedOutcomes = results.outcomes
-                .sort((a, b) => b.probability - a.probability)
-                .slice(0, 10); // Show top 10 most likely outcomes
-            
-            sortedOutcomes.forEach(outcome => {
-                const percentage = (outcome.probability * 100).toFixed(1);
-                html += `
-                    <tr>
-                        <td>${percentage}%</td>
-                        <td><strong>${outcome.totalT3}</strong></td>
-                        <td>${outcome.totalT4}</td>
-                        <td style="font-size: 0.8rem;">
-                            ${outcome.probability > 0.3 ? 'High success' : 
-                              outcome.probability > 0.1 ? 'Moderate success' : 'Low probability'}
-                        </td>
-                    </tr>
-                `;
-            });
-            
-            html += `
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        }
-        
-        html += `
-            <div class="summary" style="margin-top: 20px; padding: 20px; background: rgba(255, 215, 0, 0.1); border-radius: 8px;">
-                <h3 style="color: #ffd700; margin-bottom: 10px;">Strategy Summary</h3>
-                <p><strong>Expected Score:</strong> ${score.toFixed(1)}</p>
-                <p><strong>Sequence Length:</strong> ${sequence.length} activations</p>
-                <p><strong>Risk Level:</strong> ${this.getRiskLevel(results.outcomes)}</p>
-                <p style="margin-top: 10px; font-size: 0.9rem; color: #b0b0b0;">
-                    This strategy accounts for the 60% success rate of plot activations and shows expected returns.
-                </p>
-            </div>
-        `;
-        
-        this.resultsContent.innerHTML = html;
-    }
-
-    getRiskLevel(outcomes) {
-        if (!outcomes || outcomes.length <= 1) return "Low";
-        
-        // Calculate variance in outcomes
-        const probabilities = outcomes.map(o => o.probability);
-        const maxProb = Math.max(...probabilities);
-        
-        if (maxProb > 0.6) return "Low - High success probability";
-        if (maxProb > 0.3) return "Moderate - Mixed outcomes";
-        return "High - Many possible outcomes";
-    }
-
     displayError(message) {
         this.resultsContent.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #ff4757;">
@@ -447,5 +493,5 @@ class CropRotationOptimizer {
 
 // Initialize the optimizer when the page loads
 document.addEventListener('DOMContentLoaded', () => {
-    new CropRotationOptimizer();
+    window.optimizer = new CropRotationOptimizer();
 }); 
