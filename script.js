@@ -14,9 +14,9 @@ class CropRotationOptimizer {
 
         // 🎛️ COMPUTATION SETTINGS - Easy to adjust!
         this.computationSettings = {
-            lookaheadDepth: 7,           // How many steps ahead to plan (1 = immediate next step only)
-            maxBranchingFactor: 80000,    // Max number of sequences to evaluate per step
-            probabilityThreshold: 0.01,  // Ignore probability branches below this threshold
+            lookaheadDepth: 10,           // How many steps ahead to plan (1 = immediate next step only)
+            maxBranchingFactor: 50000,    // Max number of sequences to evaluate per step
+            probabilityThreshold: 0.005,  // Ignore probability branches below this threshold
             enableDeepSearch: true       // Whether to use more thorough but slower search
         };
         
@@ -151,9 +151,26 @@ class CropRotationOptimizer {
         this.pendingActivationResult = null;
         this.activationHistory = [];
         
+        // Clear state cache for new optimization
+        this.stateCache.clear();
+        
         // Start the interactive decision tree
         this.currentGameState = this.getInitialGameState();
         return this.getNextOptimalStep();
+    }
+
+    // 🚀 PERFORMANCE OPTIMIZATION: Create a hash key for a game state
+    getStateHash(gameState) {
+        // Create a deterministic string representation of the state
+        const plotsHash = gameState.availablePlots
+            .map(p => `${p.index}:${p.active}:${p.usedColors.sort().join(',')}`)
+            .join('|');
+        
+        const fieldsHash = gameState.plotFields
+            .map(f => `${f.plotIndex}-${f.fieldIndex}:${f.used}:${f.seeds[1]}-${f.seeds[2]}-${f.seeds[3]}-${f.seeds[4]}`)
+            .join('|');
+            
+        return `${plotsHash}||${fieldsHash}`;
     }
 
     getNextOptimalStep() {
@@ -209,119 +226,32 @@ class CropRotationOptimizer {
                 this.computationSettings.lookaheadDepth
             );
             
-            // DEBUG: Check exact field states for Plot 3 Blue vs Plot 4 Blue
-            console.log('🔍 DEBUGGING FIELD STATES');
-            const plot3BlueField = this.currentGameState.plotFields.find(f => 
-                f.plotIndex === 2 && f.color === 'blue' // Plot 3 Blue (0-indexed)
-            );
-            const plot4BlueField = this.currentGameState.plotFields.find(f => 
-                f.plotIndex === 3 && f.color === 'blue' // Plot 4 Blue (0-indexed)
-            );
+            // 🚀 PERFORMANCE OPTIMIZATION: Sort sequences by heuristic for better pruning
+            const sortedSequences = this.sortSequencesByHeuristic(sequences);
             
-            console.log('Plot 3 Blue field:', plot3BlueField);
-            console.log('Plot 4 Blue field:', plot4BlueField);
-            
-            if (plot3BlueField && plot4BlueField) {
-                const plot3Seeds = `T1:${plot3BlueField.seeds[1]}, T2:${plot3BlueField.seeds[2]}, T3:${plot3BlueField.seeds[3]}, T4:${plot3BlueField.seeds[4]}`;
-                const plot4Seeds = `T1:${plot4BlueField.seeds[1]}, T2:${plot4BlueField.seeds[2]}, T3:${plot4BlueField.seeds[3]}, T4:${plot4BlueField.seeds[4]}`;
-                
-                console.log(`Plot 3 Blue: ${plot3Seeds}`);
-                console.log(`Plot 4 Blue: ${plot4Seeds}`);
-                
-                const seedsIdentical = plot3BlueField.seeds[1] === plot4BlueField.seeds[1] &&
-                                     plot3BlueField.seeds[2] === plot4BlueField.seeds[2] &&
-                                     plot3BlueField.seeds[3] === plot4BlueField.seeds[3] &&
-                                     plot3BlueField.seeds[4] === plot4BlueField.seeds[4];
-                                     
-                if (seedsIdentical) {
-                    console.log('🚨 CONFIRMED: Plot 3 Blue and Plot 4 Blue have IDENTICAL seed counts!');
-                    console.log('This explains why they have identical scores - they are functionally equivalent.');
-                } else {
-                    console.log('🤔 Plot 3 Blue and Plot 4 Blue have DIFFERENT seed counts, but same scores - this is a bug!');
-                }
-            }
-            
-            // DEBUG: Check if Plot 3 Blue and Plot 4 Blue have the same sequences
-            console.log('🔍 DEBUGGING SEQUENCE GENERATION');
-            const plot3BlueSequences = [];
-            const plot4BlueSequences = [];
-            
-            for (const sequence of sequences) {
-                const firstStep = sequence[0];
-                if (firstStep.plotIndex === 2 && firstStep.color === 'blue') { // Plot 3 Blue (0-indexed)
-                    plot3BlueSequences.push(sequence.map(a => `Plot${a.plotIndex + 1}-${a.color}`).join(' → '));
-                }
-                if (firstStep.plotIndex === 3 && firstStep.color === 'blue') { // Plot 4 Blue (0-indexed)
-                    plot4BlueSequences.push(sequence.map(a => `Plot${a.plotIndex + 1}-${a.color}`).join(' → '));
-                }
-            }
-            
-            console.log(`Plot 3 Blue sequences (${plot3BlueSequences.length}):`);
-            plot3BlueSequences.slice(0, 10).forEach((seq, i) => console.log(`  ${i + 1}: ${seq}`));
-            
-            console.log(`Plot 4 Blue sequences (${plot4BlueSequences.length}):`);
-            plot4BlueSequences.slice(0, 10).forEach((seq, i) => console.log(`  ${i + 1}: ${seq}`));
-            
-            // Check if sequences are identical
-            const plot3Set = new Set(plot3BlueSequences);
-            const plot4Set = new Set(plot4BlueSequences);
-            const intersection = [...plot3Set].filter(x => plot4Set.has(x));
-            console.log(`Identical sequences between Plot 3 Blue and Plot 4 Blue: ${intersection.length}`);
-            if (intersection.length > 0) {
-                console.log('🚨 BUG CONFIRMED: Plot 3 Blue and Plot 4 Blue have identical sequences!');
-                console.log('First few identical sequences:');
-                intersection.slice(0, 5).forEach((seq, i) => console.log(`  ${i + 1}: ${seq}`));
-            }
-            
-            // DEBUG: Log first few sequences to see what's being evaluated
+            // Log first few sequences to see what's being evaluated
             console.log('Deep search sequences (first 5):');
-            sequences.slice(0, 5).forEach((seq, i) => {
+            sortedSequences.slice(0, 5).forEach((seq, i) => {
                 const seqStr = seq.map(a => `Plot${a.plotIndex + 1}-${a.color}`).join(' → ');
                 console.log(`  ${i + 1}: ${seqStr}`);
             });
             
-            for (const sequence of sequences) {
+            for (const sequence of sortedSequences) {
                 if (sequencesEvaluated >= this.computationSettings.maxBranchingFactor) break;
                 
-                const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
-                
-                // DEBUG: Log scores for first step activations
-                // if (sequencesEvaluated < 20) {
-                //     const firstStep = sequence[0];
-                //     const seqStr = sequence.map(a => `Plot${a.plotIndex + 1}-${a.color}`).join(' → ');
-                //     console.log(`Sequence "${seqStr}": Score ${result.expectedScore.toFixed(1)}`);
-                // }
-                
-                // DEBUG: Special logging for Blue field comparisons (COMMENTED OUT - too verbose)
-                // const blueFirstStep = sequence[0];
-                // if ((blueFirstStep.plotIndex === 2 && blueFirstStep.color === 'blue') || 
-                //     (blueFirstStep.plotIndex === 3 && blueFirstStep.color === 'blue')) {
-                //     const seqStr = sequence.map(a => `Plot${a.plotIndex + 1}-${a.color}`).join(' → ');
-                //     console.log(`🔵 BLUE COMPARISON: "${seqStr}" Score: ${result.expectedScore.toFixed(1)} (T3: ${result.expectedT3.toFixed(1)}, T4: ${result.expectedT4.toFixed(1)})`);
-                //     
-                //     // If it's a single-step sequence, show more detail about the failure case
-                //     if (sequence.length === 1) {
-                //         const successState = this.applyFieldActivation(this.currentGameState, blueFirstStep, true);
-                //         const failureState = this.applyFieldActivation(this.currentGameState, blueFirstStep, false);
-                //         
-                //         const successResult = this.calculateExpectedOutcome([], successState, 0.6);
-                //         const failureResult = this.calculateExpectedOutcome([], failureState, 0.4);
-                //         
-                //         console.log(`  Success (60%): T3=${successResult.expectedT3.toFixed(1)}, T4=${failureResult.expectedT4.toFixed(1)}, Score=${successResult.expectedScore.toFixed(1)}`);
-                //         console.log(`  Failure (40%): T3=${failureResult.expectedT3.toFixed(1)}, T4=${failureResult.expectedT4.toFixed(1)}, Score=${failureResult.expectedScore.toFixed(1)}`);
-                //         console.log(`  Total Expected: ${(successResult.expectedScore + failureResult.expectedScore).toFixed(1)}`);
-                //         
-                //         // Show what fields become unavailable on failure
-                //         const failedPlotFields = failureState.plotFields.filter(f => f.plotIndex === blueFirstStep.plotIndex);
-                //         console.log(`  Fields lost on failure:`, failedPlotFields.map(f => `${f.color} (T1:${f.seeds[1]}, T2:${f.seeds[2]})`));
-                //     }
-                // }
-                
-                // Update best score for the first step of this sequence
+                // 🚀 PERFORMANCE OPTIMIZATION: Alpha-beta pruning
                 const firstStep = sequence[0];
                 const key = `${firstStep.plotIndex}_${firstStep.color}_${firstStep.fieldIndex}`;
                 const scoreData = activationScores.get(key);
                 
+                // Skip if this sequence's first step already has a good score and we've evaluated many
+                if (scoreData.sequencesEvaluated > 50 && scoreData.bestScore < bestExpectedScore * 0.95) {
+                    continue; // Prune this branch
+                }
+                
+                const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
+                
+                // Update best score for the first step of this sequence
                 if (scoreData && result.expectedScore > scoreData.bestScore) {
                     scoreData.bestScore = result.expectedScore;
                 }
@@ -343,9 +273,6 @@ class CropRotationOptimizer {
                 for (const sequence of sequences) {
                     const result = this.calculateExpectedOutcome(sequence, this.currentGameState, 1.0);
                     
-                    // DEBUG: Log scores for comparison
-                    console.log(`Single step Plot${activation.plotIndex + 1}-${activation.color}: Score ${result.expectedScore.toFixed(1)}`);
-                    
                     // Cache the score
                     const key = `${activation.plotIndex}_${activation.color}_${activation.fieldIndex}`;
                     const scoreData = activationScores.get(key);
@@ -363,33 +290,9 @@ class CropRotationOptimizer {
 
         console.log(`Evaluated ${sequencesEvaluated} sequences for next step optimization`);
         
-        // DEBUG: Final comparison of Blue fields only (single-step evaluation)
-        console.log('🔵 FINAL BLUE FIELD COMPARISON:');
-        for (const activation of availableActivations) {
-            if (activation.color === 'blue') {
-                const singleStepResult = this.calculateExpectedOutcome([activation], this.currentGameState, 1.0);
-                console.log(`Plot ${activation.plotIndex + 1} Blue: Score ${singleStepResult.expectedScore.toFixed(1)} (T3: ${singleStepResult.expectedT3.toFixed(1)}, T4: ${singleStepResult.expectedT4.toFixed(1)})`);
-                
-                // Break down success vs failure
-                const successState = this.applyFieldActivation(this.currentGameState, activation, true);
-                const failureState = this.applyFieldActivation(this.currentGameState, activation, false);
-                
-                const successResult = this.calculateExpectedOutcome([], successState, 0.6);
-                const failureResult = this.calculateExpectedOutcome([], failureState, 0.4);
-                
-                console.log(`  Success (60%): T3=${successResult.expectedT3.toFixed(1)}, T4=${successResult.expectedT4.toFixed(1)}, Score=${successResult.expectedScore.toFixed(1)}`);
-                console.log(`  Failure (40%): T3=${failureResult.expectedT3.toFixed(1)}, T4=${failureResult.expectedT4.toFixed(1)}, Score=${failureResult.expectedScore.toFixed(1)}`);
-                console.log(`  Total Expected: ${(successResult.expectedScore + failureResult.expectedScore).toFixed(1)}`);
-                
-                // Show what fields become unavailable on failure
-                const failedPlotFields = failureState.plotFields.filter(f => f.plotIndex === activation.plotIndex);
-                const lostField = failedPlotFields.find(f => !f.used && f.color !== activation.color);
-                if (lostField) {
-                    console.log(`  Field lost on failure: Plot ${lostField.plotIndex + 1} ${lostField.color} (T1:${lostField.seeds[1]}, T2:${lostField.seeds[2]}, T3:${lostField.seeds[3]})`);
-                }
-            }
-        }
-
+        // 🚀 PERFORMANCE OPTIMIZATION: Log cache statistics
+        console.log(`State cache size: ${this.stateCache.size} entries`);
+        
         return {
             isComplete: false,
             nextActivation: bestActivation,
@@ -401,7 +304,8 @@ class CropRotationOptimizer {
             computationInfo: {
                 sequencesEvaluated: sequencesEvaluated,
                 lookaheadDepth: this.computationSettings.lookaheadDepth,
-                deepSearch: this.computationSettings.enableDeepSearch
+                deepSearch: this.computationSettings.enableDeepSearch,
+                cacheSize: this.stateCache.size
             }
         };
     }
@@ -473,20 +377,33 @@ class CropRotationOptimizer {
         const activatedColor = activation.color;
         const isSuccess = this.pendingActivationResult?.success ?? true;
         
-        // Find all fields that will be upgraded
+        // Apply the plot state changes first (plot failure/success) to get correct available plots
+        const updatedGameState = this.applyPlotStateChanges(this.currentGameState, activation, isSuccess);
+        
+        // DEBUG: Log current plot states
+        console.log('Plot states after applying success/failure:');
+        updatedGameState.availablePlots.forEach(plot => {
+            console.log(`  Plot ${plot.index + 1}: active=${plot.active}, usedColors=[${plot.usedColors.join(',')}]`);
+        });
+        
+        // Find all fields that will be upgraded - use updated state to exclude failed plots
         let fieldsToUpgrade;
         if (isSuccess) {
-            // Success: Upgrade all fields with different colors
-            fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
-                field.color !== activatedColor && !field.used
-            );
+            // Success: Upgrade all fields with different colors in ACTIVE plots
+            fieldsToUpgrade = updatedGameState.plotFields.filter(field => {
+                const plot = updatedGameState.availablePlots.find(p => p.index === field.plotIndex);
+                return field.color !== activatedColor && !field.used && plot && plot.active;
+            });
         } else {
-            // Failure: ALSO upgrade all fields with different colors (same as success)
+            // Failure: ALSO upgrade all fields with different colors in ACTIVE plots
             // The difference is only plot availability, not which fields get upgraded
-            fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
-                field.color !== activatedColor && !field.used
-            );
+            fieldsToUpgrade = updatedGameState.plotFields.filter(field => {
+                const plot = updatedGameState.availablePlots.find(p => p.index === field.plotIndex);
+                return field.color !== activatedColor && !field.used && plot && plot.active;
+            });
         }
+        
+        console.log(`Found ${fieldsToUpgrade.length} fields to upgrade:`, fieldsToUpgrade.map(f => `Plot${f.plotIndex + 1}-${f.color}`));
         
         // Store the fields that we're generating the form for
         this.pendingActivationResult.fieldsToUpgrade = fieldsToUpgrade;
@@ -977,6 +894,7 @@ class CropRotationOptimizer {
                     Lookahead: ${step.computationInfo.lookaheadDepth} steps | 
                     Deep Search: ${step.computationInfo.deepSearch ? 'On' : 'Off'}
                     ${step.expectedScore ? ` | <span style="color: #ffd700;">Expected Score: ${step.expectedScore.toFixed(1)}</span>` : ''}
+                    ${step.computationInfo.cacheSize ? ` | <span style="color: #4ecdc4;">Cache: ${step.computationInfo.cacheSize} entries</span>` : ''}
                     <br><br>
                     <strong>Alternative Options Analysis:</strong>
                     <div id="alternativeAnalysis" style="margin-top: 10px; font-size: 0.8rem;">
@@ -1053,13 +971,33 @@ class CropRotationOptimizer {
     }
 
     calculateExpectedOutcome(remainingSequence, gameState, probability, debugLevel = 0) {
+        // 🚀 PERFORMANCE OPTIMIZATION: Check cache first
+        const stateHash = this.getStateHash(gameState);
+        const sequenceHash = remainingSequence.map(a => `${a.plotIndex}-${a.fieldIndex}`).join(',');
+        const cacheKey = `${stateHash}:${sequenceHash}`;
+        
+        if (this.stateCache.has(cacheKey)) {
+            const cached = this.stateCache.get(cacheKey);
+            // Scale cached result by the current probability
+            return {
+                expectedScore: cached.expectedScore * probability,
+                expectedT3: cached.expectedT3 * probability,
+                expectedT4: cached.expectedT4 * probability,
+                probability: probability,
+                outcomes: cached.outcomes.map(outcome => ({
+                    ...outcome,
+                    probability: outcome.probability * probability
+                }))
+            };
+        }
+
         // Base case: no more activations
         if (remainingSequence.length === 0) {
             const totalT3 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
             const totalT4 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
             const score = totalT3 * 10 + totalT4 * -5;
             
-            return {
+            const result = {
                 expectedScore: score * probability,
                 expectedT3: totalT3 * probability,
                 expectedT4: totalT4 * probability,
@@ -1071,6 +1009,21 @@ class CropRotationOptimizer {
                     totalT4: totalT4
                 }]
             };
+            
+            // Cache the normalized result (probability = 1.0) for reuse
+            this.stateCache.set(cacheKey, {
+                expectedScore: score,
+                expectedT3: totalT3,
+                expectedT4: totalT4,
+                outcomes: [{
+                    plotFields: gameState.plotFields,
+                    probability: 1.0,
+                    totalT3: totalT3,
+                    totalT4: totalT4
+                }]
+            });
+            
+            return result;
         }
 
         const activation = remainingSequence[0];
@@ -1143,13 +1096,26 @@ class CropRotationOptimizer {
         const adjustedFailureScore = failureOutcome.expectedScore - (failureOpportunityCost * probability * 0.4);
         
         // Combine outcomes
-        return {
+        const result = {
             expectedScore: successOutcome.expectedScore + adjustedFailureScore,
             expectedT3: successOutcome.expectedT3 + failureOutcome.expectedT3,
             expectedT4: successOutcome.expectedT4 + failureOutcome.expectedT4,
             probability: probability,
             outcomes: [...successOutcome.outcomes, ...failureOutcome.outcomes]
         };
+        
+        // 🚀 PERFORMANCE OPTIMIZATION: Cache the normalized result (probability = 1.0) for reuse
+        this.stateCache.set(cacheKey, {
+            expectedScore: result.expectedScore / probability,
+            expectedT3: result.expectedT3 / probability,
+            expectedT4: result.expectedT4 / probability,
+            outcomes: result.outcomes.map(outcome => ({
+                ...outcome,
+                probability: outcome.probability / probability
+            }))
+        });
+        
+        return result;
     }
 
     upgradeSeeds(colorSeeds) {
@@ -1211,16 +1177,16 @@ class CropRotationOptimizer {
                 probabilityThreshold: 0.05
             },
             balanced: {
-                lookaheadDepth: 3,
-                maxBranchingFactor: 200,
+                lookaheadDepth: 5,
+                maxBranchingFactor: 1000,
                 enableDeepSearch: true,
                 probabilityThreshold: 0.02
             },
             thorough: {
-                lookaheadDepth: 5,
-                maxBranchingFactor: 2000,
+                lookaheadDepth: 10,
+                maxBranchingFactor: 50000,
                 enableDeepSearch: true,
-                probabilityThreshold: 0.01
+                probabilityThreshold: 0.005
             }
         };
 
@@ -1559,6 +1525,93 @@ class CropRotationOptimizer {
         // Reset the current step to the original recommended step
         this.currentStep = this.getNextOptimalStep();
         this.displayInteractiveResults();
+    }
+
+    // 🚀 PERFORMANCE OPTIMIZATION: Sort sequences by heuristic for better alpha-beta pruning
+    sortSequencesByHeuristic(sequences) {
+        // Sort sequences by potential value heuristic (higher potential first)
+        return sequences.sort((a, b) => {
+            const scoreA = this.calculateSequenceHeuristic(a);
+            const scoreB = this.calculateSequenceHeuristic(b);
+            return scoreB - scoreA; // Higher scores first
+        });
+    }
+
+    // 🚀 PERFORMANCE OPTIMIZATION: Quick heuristic to estimate sequence potential
+    calculateSequenceHeuristic(sequence) {
+        if (sequence.length === 0) return 0;
+        
+        // Focus on the first activation's immediate potential
+        const firstActivation = sequence[0];
+        const targetField = this.currentGameState.plotFields.find(f => 
+            f.plotIndex === firstActivation.plotIndex && 
+            f.fieldIndex === firstActivation.fieldIndex
+        );
+        
+        if (!targetField) return 0;
+        
+        // Heuristic: prioritize fields with more T2 seeds (higher upgrade potential)
+        // and consider existing T3 seeds
+        let score = 0;
+        score += targetField.seeds[2] * 2; // T2 seeds have upgrade potential
+        score += targetField.seeds[3] * 10; // T3 seeds have direct value
+        score -= targetField.seeds[4] * 5; // T4 seeds reduce value
+        
+        // Bonus for activating fields that will upgrade many other fields
+        const otherFields = this.currentGameState.plotFields.filter(f => 
+            f.color !== firstActivation.color && !f.used
+        );
+        const upgradeValue = otherFields.reduce((sum, field) => {
+            return sum + field.seeds[2] * 0.20 + field.seeds[1] * 0.25 * 0.20;
+        }, 0);
+        score += upgradeValue * 3; // Weight upgrade potential
+        
+        // Penalty for shorter sequences (prefer longer planning)
+        score += sequence.length * 5;
+        
+        return score;
+    }
+
+    applyPlotStateChanges(gameState, activation, isSuccess) {
+        // Create a deep copy of the game state
+        const newState = {
+            availablePlots: gameState.availablePlots.map(p => ({ 
+                ...p, 
+                colors: [...p.colors],
+                usedColors: [...p.usedColors]
+            })),
+            plotFields: gameState.plotFields.map(f => ({ 
+                ...f, 
+                seeds: { ...f.seeds }
+            }))
+        };
+        
+        const activatedColor = activation.color;
+        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
+        
+        // Mark the activated field as used
+        const activatedField = newState.plotFields.find(f => 
+            f.plotIndex === activation.plotIndex && 
+            f.fieldIndex === activation.fieldIndex
+        );
+        activatedField.used = true;
+        activatedPlot.usedColors.push(activatedColor);
+        
+        // Apply plot state changes based on success/failure
+        if (isSuccess) {
+            // 60% success: Plot stays active unless both fields are used
+            const plotFields = newState.plotFields.filter(f => f.plotIndex === activation.plotIndex);
+            const allFieldsUsed = plotFields.every(field => field.used);
+            
+            if (allFieldsUsed) {
+                activatedPlot.active = false;
+            }
+        } else {
+            // 40% failure: Plot becomes unavailable (can't activate the other field)
+            activatedPlot.active = false;
+        }
+        
+        return newState;
     }
 }
 
