@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoE Crop Rotation Optimizer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌱 PoE Crop Rotation Optimizer</h1>
+            <p>Optimize your Path of Exile Harvest crop rotation for maximum T3 seed yield</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <div class="card">
+                    <h2>Harvest Configuration</h2>
+                    
+                    <div class="form-group">
+                        <label for="plotCount">Number of Plots:</label>
+                        <select id="plotCount">
+                            <option value="3">3 Plots</option>
+                            <option value="4">4 Plots</option>
+                            <option value="5">5 Plots</option>
+                        </select>
+                    </div>
+
+                    <div id="plotsContainer" class="plots-container">
+                        <!-- Plot configurations will be generated here -->
+                    </div>
+
+                    <button id="optimizeBtn" class="btn-primary">Optimize Rotation</button>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <div class="card">
+                    <h2>Optimization Results</h2>
+                    <div id="loadingIndicator" class="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Calculating optimal rotation...</p>
+                    </div>
+                    <div id="resultsContent">
+                        <p class="placeholder">Configure your plots and click "Optimize Rotation" to see results.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="card">
+                    <h2>How It Works</h2>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <h3>Seed Tiers</h3>
+                            <p>T1 → T2: 25% chance<br>
+                               T2 → T3: 20% chance<br>
+                               T3 → T4: 5% chance</p>
+                        </div>
+                        <div class="info-item">
+                            <h3>Colors</h3>
+                            <p>🟡 Yellow (Primal)<br>
+                               🔴 Red (Wild)<br>
+                               🔵 Blue (Vivid)</p>
+                        </div>
+                        <div class="info-item">
+                            <h3>Strategy</h3>
+                            <p>Activate plots to upgrade non-matching colors. Optimize for maximum T3 seeds while minimizing T4 conversion.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Made for Path of Exile Harvest optimization • <a href="https://github.com" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
