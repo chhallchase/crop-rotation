@@ -151,27 +151,21 @@ class CropRotationOptimizer {
     }
 
     getNextOptimalStep() {
-        // Generate possible next activations from current state
+        // Generate possible next activations (field activations)
         const availableActivations = [];
         
         for (const plot of this.currentGameState.availablePlots) {
             if (plot.active) {
-                // Count how many of each color are available vs used
-                const colorCounts = {};
-                plot.colors.forEach(color => {
-                    colorCounts[color] = (colorCounts[color] || 0) + 1;
-                });
-                
-                // Add activations for colors that still have unused instances
-                for (const color of Object.keys(colorCounts)) {
-                    const totalOfThisColor = colorCounts[color];
-                    const usedOfThisColor = plot.usedColorCounts[color] || 0;
-                    const remainingOfThisColor = totalOfThisColor - usedOfThisColor;
-                    
-                    if (remainingOfThisColor > 0) {
-                        availableActivations.push({ plotIndex: plot.index, color: color });
+                // Check each color in this plot
+                plot.colors.forEach((color, colorIndex) => {
+                    if (!plot.usedColors.includes(color)) {
+                        availableActivations.push({ 
+                            plotIndex: plot.index, 
+                            color: color,
+                            fieldIndex: colorIndex 
+                        });
                     }
-                }
+                });
             }
         }
 
@@ -289,8 +283,12 @@ class CropRotationOptimizer {
     }
 
     showUpgradeInputForm(activation) {
-        const plot = this.plots[activation.plotIndex];
-        const upgradedColors = this.colors.filter(color => color !== activation.color);
+        const activatedColor = activation.color;
+        
+        // Find all fields that will be upgraded (all fields with different colors than activated)
+        const fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
+            field.color !== activatedColor && !field.used
+        );
         
         let html = `
             <div class="upgrade-input-form" style="background: rgba(76, 205, 196, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -299,34 +297,33 @@ class CropRotationOptimizer {
                     <strong>Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong> succeeded!
                 </p>
                 <p style="margin-bottom: 20px; color: #b0b0b0;">
-                    Please enter the actual upgrade results for each color:
+                    Please enter the actual upgrade results for each affected field:
                 </p>
                 
                 <div class="upgrade-inputs">
         `;
 
-        upgradedColors.forEach(color => {
-            const currentSeeds = this.currentGameState.seedCounts[color];
+        fieldsToUpgrade.forEach((field, index) => {
             html += `
-                <div class="color-upgrade-input" style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <div class="field-upgrade-input" style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                     <h5 style="color: #ffd700; margin-bottom: 10px;">
-                        ${this.colorEmojis[color]} ${this.colorNames[color]}
+                        Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]} Field
                     </h5>
                     <div style="font-size: 0.9rem; color: #888; margin-bottom: 10px;">
-                        Current: ${currentSeeds[1]} T1, ${currentSeeds[2]} T2, ${currentSeeds[3]} T3, ${currentSeeds[4]} T4
+                        Current: ${field.seeds[1]} T1, ${field.seeds[2]} T2, ${field.seeds[3]} T3, ${field.seeds[4]} T4
                     </div>
                     <div class="upgrade-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                         <div>
                             <label style="font-size: 0.8rem;">T1→T2:</label>
-                            <input type="number" id="upgrade_${color}_1to2" min="0" max="${currentSeeds[1]}" value="${Math.round(currentSeeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
+                            <input type="number" id="upgrade_field_${index}_1to2" min="0" max="${field.seeds[1]}" value="${Math.round(field.seeds[1] * 0.25)}" style="width: 100%; padding: 5px;">
                         </div>
                         <div>
                             <label style="font-size: 0.8rem;">T2→T3:</label>
-                            <input type="number" id="upgrade_${color}_2to3" min="0" max="${currentSeeds[2]}" value="${Math.round(currentSeeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
+                            <input type="number" id="upgrade_field_${index}_2to3" min="0" max="${field.seeds[2]}" value="${Math.round(field.seeds[2] * 0.20)}" style="width: 100%; padding: 5px;">
                         </div>
                         <div>
                             <label style="font-size: 0.8rem;">T3→T4:</label>
-                            <input type="number" id="upgrade_${color}_3to4" min="0" max="${currentSeeds[3]}" value="${Math.round(currentSeeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
+                            <input type="number" id="upgrade_field_${index}_3to4" min="0" max="${field.seeds[3]}" value="${Math.round(field.seeds[3] * 0.05)}" style="width: 100%; padding: 5px;">
                         </div>
                     </div>
                 </div>
@@ -336,7 +333,7 @@ class CropRotationOptimizer {
         html += `
                 </div>
                 <div style="text-align: center; margin-top: 20px;">
-                    <button onclick="optimizer.processUpgradeResults('${activation.plotIndex}', '${activation.color}')" 
+                    <button onclick="optimizer.processFieldUpgradeResults('${activation.plotIndex}', '${activation.color}', ${fieldsToUpgrade.length})" 
                             style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
                         Continue with These Results
                     </button>
@@ -351,122 +348,115 @@ class CropRotationOptimizer {
         this.resultsContent.innerHTML = html;
     }
 
-    processUpgradeResults(plotIndex, color) {
+    processFieldUpgradeResults(plotIndex, color, fieldCount) {
         const activation = { plotIndex: parseInt(plotIndex), color: color };
-        const upgradedColors = this.colors.filter(c => c !== color);
+        const activatedColor = color;
         
-        // Collect actual upgrade results from form
-        const actualUpgrades = {};
-        for (const upgradedColor of upgradedColors) {
-            const t1to2 = parseInt(document.getElementById(`upgrade_${upgradedColor}_1to2`).value) || 0;
-            const t2to3 = parseInt(document.getElementById(`upgrade_${upgradedColor}_2to3`).value) || 0;
-            const t3to4 = parseInt(document.getElementById(`upgrade_${upgradedColor}_3to4`).value) || 0;
+        // Find all fields that were upgraded
+        const fieldsToUpgrade = this.currentGameState.plotFields.filter(field => 
+            field.color !== activatedColor && !field.used
+        );
+        
+        // Collect actual upgrade results for each field
+        const fieldUpgrades = {};
+        fieldsToUpgrade.forEach((field, index) => {
+            const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
+            const t1to2 = parseInt(document.getElementById(`upgrade_field_${index}_1to2`).value) || 0;
+            const t2to3 = parseInt(document.getElementById(`upgrade_field_${index}_2to3`).value) || 0;
+            const t3to4 = parseInt(document.getElementById(`upgrade_field_${index}_3to4`).value) || 0;
             
-            actualUpgrades[upgradedColor] = {
+            fieldUpgrades[fieldKey] = {
                 t1to2: t1to2,
                 t2to3: t2to3,
                 t3to4: t3to4
             };
-        }
+        });
 
-        this.completeActivation(activation, true, actualUpgrades);
+        this.completeActivation(activation, true, fieldUpgrades);
     }
 
     useExpectedValues(plotIndex, color) {
         const activation = { plotIndex: parseInt(plotIndex), color: color };
-        this.completeActivation(activation, true, null);
+        this.completeActivation(activation, true);
     }
 
-    completeActivation(activation, success, actualUpgrades) {
-        // Record the activation in history
+    completeActivation(activation, success, actualUpgrades = null) {
+        // Record this activation in history
         this.activationHistory.push({
             activation: activation,
             success: success,
             actualUpgrades: actualUpgrades,
-            seedsBefore: JSON.parse(JSON.stringify(this.currentGameState.seedCounts))
+            seedsBefore: JSON.parse(JSON.stringify(this.currentGameState.plotFields))
         });
 
         // Apply the activation to current state
-        this.currentGameState = this.applyPlotActivationWithActuals(this.currentGameState, activation, success, actualUpgrades);
+        this.currentGameState = this.applyFieldActivation(this.currentGameState, activation, success, actualUpgrades);
 
         // Get next optimal step
-        this.currentStep = this.getNextOptimalStep();
-        
-        // Update display
-        this.displayInteractiveResults();
+        const nextStep = this.getNextOptimalStep();
+        this.displayStep(nextStep);
     }
 
-    applyPlotActivationWithActuals(gameState, activation, success, actualUpgrades) {
+    applyFieldActivation(gameState, activation, success, actualUpgrades = null) {
         // Create a deep copy of the game state
         const newState = {
             availablePlots: gameState.availablePlots.map(p => ({ 
                 ...p, 
                 colors: [...p.colors],
-                usedColorCounts: { ...p.usedColorCounts }
+                usedColors: [...p.usedColors]
             })),
-            seedCounts: {}
+            plotFields: gameState.plotFields.map(f => ({ 
+                ...f, 
+                seeds: { ...f.seeds }
+            }))
         };
         
-        // Deep copy seed counts
-        for (const color of this.colors) {
-            newState.seedCounts[color] = { ...gameState.seedCounts[color] };
-        }
-        
-        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
         const activatedColor = activation.color;
+        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
         
         if (success) {
-            // Determine which colors get upgraded
-            const upgradedColors = this.colors.filter(color => color !== activatedColor);
+            // Mark this color as used in the plot
+            activatedPlot.usedColors.push(activatedColor);
             
-            if (actualUpgrades) {
-                // Use actual upgrade results
-                for (const color of upgradedColors) {
-                    const upgrades = actualUpgrades[color];
+            // Find all fields that should be upgraded (different color, not used)
+            const fieldsToUpgrade = newState.plotFields.filter(field => 
+                field.color !== activatedColor && !field.used
+            );
+            
+            // Apply upgrades to each field
+            fieldsToUpgrade.forEach((field, index) => {
+                if (actualUpgrades) {
+                    // Use actual upgrade results
+                    const fieldKey = `${field.plotIndex}_${field.fieldIndex}`;
+                    const upgrades = actualUpgrades[fieldKey];
                     if (upgrades) {
-                        // Apply actual upgrades
-                        newState.seedCounts[color][1] -= upgrades.t1to2;
-                        newState.seedCounts[color][2] += upgrades.t1to2 - upgrades.t2to3;
-                        newState.seedCounts[color][3] += upgrades.t2to3 - upgrades.t3to4;
-                        newState.seedCounts[color][4] += upgrades.t3to4;
+                        field.seeds[1] -= upgrades.t1to2;
+                        field.seeds[2] += upgrades.t1to2 - upgrades.t2to3;
+                        field.seeds[3] += upgrades.t2to3 - upgrades.t3to4;
+                        field.seeds[4] += upgrades.t3to4;
                         
                         // Ensure no negative values
                         for (let tier = 1; tier <= 4; tier++) {
-                            newState.seedCounts[color][tier] = Math.max(0, newState.seedCounts[color][tier]);
+                            field.seeds[tier] = Math.max(0, field.seeds[tier]);
                         }
                     }
+                } else {
+                    // Use expected values
+                    this.upgradeSeeds(field.seeds);
                 }
-            } else {
-                // Use expected values as fallback
-                for (const color of upgradedColors) {
-                    this.upgradeSeeds(newState.seedCounts[color]);
-                }
-            }
-            
-            // Mark color as used in plot
-            activatedPlot.usedColorCounts[activatedColor] = (activatedPlot.usedColorCounts[activatedColor] || 0) + 1;
-            
-            // Check if all color instances in this plot are used
-            const colorCounts = {};
-            activatedPlot.colors.forEach(color => {
-                colorCounts[color] = (colorCounts[color] || 0) + 1;
             });
             
-            let allColorsUsed = true;
-            for (const color of Object.keys(colorCounts)) {
-                const totalOfThisColor = colorCounts[color];
-                const usedOfThisColor = activatedPlot.usedColorCounts[color] || 0;
-                if (usedOfThisColor < totalOfThisColor) {
-                    allColorsUsed = false;
-                    break;
-                }
-            }
+            // Check if this plot is fully used
+            const plotColors = this.plots[activation.plotIndex];
+            const allColorsUsed = [plotColors.color1, plotColors.color2].every(color => 
+                activatedPlot.usedColors.includes(color)
+            );
             
             if (allColorsUsed) {
                 activatedPlot.active = false;
             }
         } else {
-            // 40% failure: plot colors cancel each other, entire plot becomes unavailable
+            // 40% failure: entire plot becomes unavailable
             activatedPlot.active = false;
         }
         
@@ -488,8 +478,8 @@ class CropRotationOptimizer {
         `;
 
         // Show current seed counts
-        const currentT3 = this.colors.reduce((sum, color) => sum + step.currentState.seedCounts[color][3], 0);
-        const currentT4 = this.colors.reduce((sum, color) => sum + step.currentState.seedCounts[color][4], 0);
+        const currentT3 = this.colors.reduce((sum, color) => sum + step.currentState.plotFields.find(f => f.color === color).seeds[3], 0);
+        const currentT4 = this.colors.reduce((sum, color) => sum + step.currentState.plotFields.find(f => f.color === color).seeds[4], 0);
 
         html += `
             <div class="current-status" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 15px; margin: 20px 0;">
@@ -525,7 +515,7 @@ class CropRotationOptimizer {
 
             html += `
                     </div>
-                    <button onclick="optimizer.undoLastStep()" class="btn-secondary" style="margin-top: 10px;">↶ Undo Last Step</button>
+                    <button onclick="optimizer.undoLastActivation()" class="btn-secondary" style="margin-top: 10px;">↶ Undo Last Step</button>
                 </div>
             `;
         }
@@ -595,28 +585,45 @@ class CropRotationOptimizer {
     }
 
     getInitialGameState() {
-        // Initial game state: all plots available, 23 T1 seeds per color
-        const seedCounts = {};
-        for (const color of this.colors) {
-            seedCounts[color] = { 1: 23, 2: 0, 3: 0, 4: 0 };
-        }
+        // Each plot has 2 fields, each field has 23 T1 seeds
+        const plotFields = [];
+        
+        this.plots.forEach((plot, plotIndex) => {
+            // Add field for color 1
+            plotFields.push({
+                plotIndex: plotIndex,
+                fieldIndex: 0,
+                color: plot.color1,
+                seeds: { 1: 23, 2: 0, 3: 0, 4: 0 },
+                used: false
+            });
+            
+            // Add field for color 2
+            plotFields.push({
+                plotIndex: plotIndex,
+                fieldIndex: 1,
+                color: plot.color2,
+                seeds: { 1: 23, 2: 0, 3: 0, 4: 0 },
+                used: false
+            });
+        });
         
         return {
             availablePlots: this.plots.map((plot, index) => ({ 
                 index, 
                 colors: [plot.color1, plot.color2],
                 active: true,
-                usedColorCounts: {} // Track count of each color used (e.g., {yellow: 1, red: 0})
+                usedColors: [] // Track which colors in this plot have been activated
             })),
-            seedCounts: seedCounts
+            plotFields: plotFields
         };
     }
 
     calculateExpectedOutcome(remainingSequence, gameState, probability) {
         // Base case: no more activations
         if (remainingSequence.length === 0) {
-            const totalT3 = this.colors.reduce((sum, color) => sum + gameState.seedCounts[color][3], 0);
-            const totalT4 = this.colors.reduce((sum, color) => sum + gameState.seedCounts[color][4], 0);
+            const totalT3 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
+            const totalT4 = gameState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
             const score = totalT3 * 10 + totalT4 * -5;
             
             return {
@@ -625,7 +632,7 @@ class CropRotationOptimizer {
                 expectedT4: totalT4 * probability,
                 probability: probability,
                 outcomes: [{
-                    seedCounts: gameState.seedCounts,
+                    plotFields: gameState.plotFields,
                     probability: probability,
                     totalT3: totalT3,
                     totalT4: totalT4
@@ -636,16 +643,16 @@ class CropRotationOptimizer {
         const activation = remainingSequence[0];
         const remainingAfter = remainingSequence.slice(1);
         
-        // Check if plot is still available
+        // Check if this activation is still possible
         const plot = gameState.availablePlots.find(p => p.index === activation.plotIndex);
-        if (!plot || !plot.active) {
-            // Plot not available, skip this activation
+        if (!plot || !plot.active || plot.usedColors.includes(activation.color)) {
+            // Activation not possible, skip it
             return this.calculateExpectedOutcome(remainingAfter, gameState, probability);
         }
 
         // Calculate outcomes for both success (60%) and failure (40%) scenarios
-        const successState = this.applyPlotActivation(gameState, activation, true);
-        const failureState = this.applyPlotActivation(gameState, activation, false);
+        const successState = this.applyFieldActivation(gameState, activation, true);
+        const failureState = this.applyFieldActivation(gameState, activation, false);
         
         const successOutcome = this.calculateExpectedOutcome(remainingAfter, successState, probability * 0.6);
         const failureOutcome = this.calculateExpectedOutcome(remainingAfter, failureState, probability * 0.4);
@@ -658,65 +665,6 @@ class CropRotationOptimizer {
             probability: probability,
             outcomes: [...successOutcome.outcomes, ...failureOutcome.outcomes]
         };
-    }
-
-    applyPlotActivation(gameState, activation, success) {
-        // Create a deep copy of the game state
-        const newState = {
-            availablePlots: gameState.availablePlots.map(p => ({ 
-                ...p, 
-                colors: [...p.colors],
-                usedColorCounts: { ...p.usedColorCounts }
-            })),
-            seedCounts: {}
-        };
-        
-        // Deep copy seed counts
-        for (const color of this.colors) {
-            newState.seedCounts[color] = { ...gameState.seedCounts[color] };
-        }
-        
-        const activatedPlot = newState.availablePlots.find(p => p.index === activation.plotIndex);
-        const activatedColor = activation.color;
-        
-        // Determine which colors get upgraded (all colors NOT the activated color)
-        const upgradedColors = this.colors.filter(color => color !== activatedColor);
-        
-        // Upgrade seeds for non-activated colors
-        for (const color of upgradedColors) {
-            this.upgradeSeeds(newState.seedCounts[color]);
-        }
-        
-        // Handle plot survival based on success/failure
-        if (success) {
-            // 60% success: increment count of this specific color used
-            activatedPlot.usedColorCounts[activatedColor] = (activatedPlot.usedColorCounts[activatedColor] || 0) + 1;
-            
-            // Check if all color instances in this plot are used
-            const colorCounts = {};
-            activatedPlot.colors.forEach(color => {
-                colorCounts[color] = (colorCounts[color] || 0) + 1;
-            });
-            
-            let allColorsUsed = true;
-            for (const color of Object.keys(colorCounts)) {
-                const totalOfThisColor = colorCounts[color];
-                const usedOfThisColor = activatedPlot.usedColorCounts[color] || 0;
-                if (usedOfThisColor < totalOfThisColor) {
-                    allColorsUsed = false;
-                    break;
-                }
-            }
-            
-            if (allColorsUsed) {
-                activatedPlot.active = false;
-            }
-        } else {
-            // 40% failure: plot colors cancel each other, entire plot becomes unavailable
-            activatedPlot.active = false;
-        }
-        
-        return newState;
     }
 
     upgradeSeeds(colorSeeds) {
@@ -817,18 +765,21 @@ class CropRotationOptimizer {
         this.probabilityThresholdInput.value = this.computationSettings.probabilityThreshold;
     }
 
-    undoLastStep() {
-        if (this.activationHistory.length === 0) return;
+    undoLastActivation() {
+        if (this.activationHistory.length === 0) {
+            alert('No activations to undo!');
+            return;
+        }
 
         // Remove last activation from history
-        const lastAction = this.activationHistory.pop();
-        
-        // Restore game state to before last activation
+        this.activationHistory.pop();
+
+        // Reset to initial state and replay history
         this.currentGameState = this.getInitialGameState();
-        
+
         // Replay all remaining history
         for (const historyItem of this.activationHistory) {
-            this.currentGameState = this.applyPlotActivationWithActuals(
+            this.currentGameState = this.applyFieldActivation(
                 this.currentGameState, 
                 historyItem.activation, 
                 historyItem.success,
@@ -836,9 +787,140 @@ class CropRotationOptimizer {
             );
         }
 
-        // Recalculate optimal next step
-        this.currentStep = this.getNextOptimalStep();
-        this.displayInteractiveResults();
+        // Get and display next optimal step
+        const nextStep = this.getNextOptimalStep();
+        this.displayStep(nextStep);
+    }
+
+    displayStep(step) {
+        let html = '';
+
+        if (step.isComplete) {
+            // Calculate final totals
+            const totalT3 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
+            const totalT4 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
+            
+            html = `
+                <div class="final-results" style="background: rgba(76, 205, 196, 0.15); border-radius: 12px; padding: 30px; text-align: center;">
+                    <h3 style="color: #4ecdc4; margin-bottom: 20px;">🎯 Optimization Complete!</h3>
+                    <div style="font-size: 1.2rem; margin-bottom: 20px;">
+                        <div style="margin-bottom: 10px;">
+                            <span style="color: #ffd700;">Total T3 Seeds: ${totalT3}</span>
+                        </div>
+                        <div style="color: #ff6b6b;">
+                            Total T4 Seeds: ${totalT4}
+                        </div>
+                    </div>
+                    
+                    <h4 style="color: #ffd700; margin: 20px 0 15px;">Final Field States:</h4>
+                    <div class="field-results" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+            `;
+            
+            step.currentState.plotFields.forEach(field => {
+                html += `
+                    <div style="background: rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 15px;">
+                        <h5 style="color: #ffd700; margin-bottom: 10px;">
+                            Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]}
+                        </h5>
+                        <div style="font-size: 0.9rem;">
+                            T1: ${field.seeds[1]} | T2: ${field.seeds[2]} | 
+                            <span style="color: #ffd700;">T3: ${field.seeds[3]}</span> | 
+                            <span style="color: #ff6b6b;">T4: ${field.seeds[4]}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                    <button onclick="optimizer.resetOptimization()" 
+                            style="background: #6c5ce7; color: white; border: none; padding: 12px 24px; border-radius: 8px; margin-top: 20px; cursor: pointer;">
+                        Start New Optimization
+                    </button>
+                </div>
+            `;
+        } else {
+            // Show current step
+            const activation = step.nextActivation;
+            const plot = this.plots[activation.plotIndex];
+            
+            html = `
+                <div class="optimization-step" style="background: rgba(108, 92, 231, 0.1); border-radius: 12px; padding: 25px;">
+                    <div style="text-align: center; margin-bottom: 25px;">
+                        <h3 style="color: #6c5ce7; margin-bottom: 10px;">
+                            🎯 Next Optimal Move
+                        </h3>
+                        <div style="font-size: 1.1rem; color: #e0e0e0;">
+                            Activate <strong>Plot ${activation.plotIndex + 1}</strong> - 
+                            ${this.colorEmojis[activation.color]} <strong>${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons" style="text-align: center; margin-bottom: 25px;">
+                        <button onclick="optimizer.reportSuccess(${JSON.stringify(activation).replace(/"/g, '&quot;')})" 
+                                style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
+                            ✅ Success (60%)
+                        </button>
+                        <button onclick="optimizer.reportFailure(${JSON.stringify(activation).replace(/"/g, '&quot;')})" 
+                                style="background: #e74c3c; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
+                            ❌ Failure (40%)
+                        </button>
+                    </div>
+            `;
+
+            // Show current field states
+            const totalT3 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
+            const totalT4 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
+
+            html += `
+                    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                        <h4 style="color: #ffd700; margin-bottom: 15px;">Current State</h4>
+                        <div style="text-align: center; margin-bottom: 15px; font-size: 1.1rem;">
+                            <span style="color: #ffd700;">Total T3: ${totalT3}</span> | 
+                            <span style="color: #ff6b6b;">Total T4: ${totalT4}</span>
+                        </div>
+                        
+                        <div class="field-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+            `;
+            
+            step.currentState.plotFields.forEach(field => {
+                const isUsed = step.currentState.availablePlots.find(p => p.index === field.plotIndex)?.usedColors.includes(field.color);
+                html += `
+                    <div style="background: rgba(255, 255, 255, ${isUsed ? '0.02' : '0.08'}); border-radius: 6px; padding: 10px; ${isUsed ? 'opacity: 0.5;' : ''}">
+                        <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">
+                            Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]}
+                            ${isUsed ? ' (Used)' : ''}
+                        </div>
+                        <div style="font-size: 0.8rem;">
+                            T1: ${field.seeds[1]} | T2: ${field.seeds[2]} | 
+                            T3: ${field.seeds[3]} | T4: ${field.seeds[4]}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                        </div>
+                    </div>
+            `;
+
+            // Show computation details if available
+            if (step.computationInfo) {
+                html += `
+                    <div style="background: rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 15px; margin-top: 15px; font-size: 0.9rem; color: #888;">
+                        <strong>Computation Details:</strong> 
+                        Evaluated ${step.computationInfo.sequencesEvaluated} sequences | 
+                        Lookahead: ${step.computationInfo.lookaheadDepth} steps | 
+                        Deep Search: ${step.computationInfo.deepSearch ? 'On' : 'Off'}
+                        ${step.expectedScore ? ` | Expected Score: ${step.expectedScore.toFixed(1)}` : ''}
+                    </div>
+                `;
+            }
+
+            html += `</div>`;
+        }
+
+        this.resultsContent.innerHTML = html;
     }
 }
 
