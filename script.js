@@ -179,13 +179,14 @@ class CropRotationOptimizer {
         
         for (const plot of this.currentGameState.availablePlots) {
             if (plot.active) {
-                // Check each color in this plot
-                plot.colors.forEach((color, colorIndex) => {
-                    if (!plot.usedColors.includes(color)) {
+                // Check each field in this plot individually
+                const plotFields = this.currentGameState.plotFields.filter(f => f.plotIndex === plot.index);
+                plotFields.forEach(field => {
+                    if (!field.used) {
                         availableActivations.push({ 
                             plotIndex: plot.index, 
-                            color: color,
-                            fieldIndex: colorIndex 
+                            color: field.color,
+                            fieldIndex: field.fieldIndex 
                         });
                     }
                 });
@@ -592,8 +593,7 @@ class CropRotationOptimizer {
         
         activatedField.used = true;
         
-        // Also mark this color as used in the plot (for UI display)
-        activatedPlot.usedColors.push(activatedColor);
+
         
         // Apply upgrades to fields based on success/failure
         let fieldsToUpgrade;
@@ -850,9 +850,8 @@ class CropRotationOptimizer {
             
             step.currentState.plotFields.forEach(field => {
                 const plot = step.currentState.availablePlots.find(p => p.index === field.plotIndex);
-                const isColorUsed = plot?.usedColors.includes(field.color);
                 const isPlotInactive = !plot?.active;
-                const isUnavailable = isColorUsed || isPlotInactive || field.used;
+                const isUnavailable = isPlotInactive || field.used;
                 
                 // Check if this field is available for activation
                 const isClickable = !isUnavailable;
@@ -865,8 +864,7 @@ class CropRotationOptimizer {
                          ${clickHandler} ${hoverStyle}>
                         <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">
                             Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]}
-                            ${isColorUsed ? ' (Used)' : ''}
-                            ${isPlotInactive && !isColorUsed ? ' (Plot Failed)' : ''}
+                            ${isPlotInactive && !field.used ? ' (Plot Failed)' : ''}
                             ${field.used ? ' (Field Used)' : ''}
                             ${isClickable ? ' 👆' : ''}
                         </div>
@@ -1031,7 +1029,11 @@ class CropRotationOptimizer {
         
         // Check if this activation is still possible
         const plot = gameState.availablePlots.find(p => p.index === activation.plotIndex);
-        if (!plot || !plot.active || plot.usedColors.includes(activation.color)) {
+        const targetField = gameState.plotFields.find(f => 
+            f.plotIndex === activation.plotIndex && f.fieldIndex === activation.fieldIndex
+        );
+        
+        if (!plot || !plot.active || !targetField || targetField.used) {
             // Activation not possible, skip it
             return this.calculateExpectedOutcome(remainingAfter, gameState, probability, debugLevel);
         }
@@ -1595,7 +1597,6 @@ class CropRotationOptimizer {
             f.fieldIndex === activation.fieldIndex
         );
         activatedField.used = true;
-        activatedPlot.usedColors.push(activatedColor);
         
         // Apply plot state changes based on success/failure
         if (isSuccess) {
