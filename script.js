@@ -14,8 +14,8 @@ class CropRotationOptimizer {
 
         // 🎛️ COMPUTATION SETTINGS - Easy to adjust!
         this.computationSettings = {
-            lookaheadDepth: 5,           // How many steps ahead to plan (1 = immediate next step only)
-            maxBranchingFactor: 2000,    // Max number of sequences to evaluate per step
+            lookaheadDepth: 7,           // How many steps ahead to plan (1 = immediate next step only)
+            maxBranchingFactor: 80000,    // Max number of sequences to evaluate per step
             probabilityThreshold: 0.01,  // Ignore probability branches below this threshold
             enableDeepSearch: true       // Whether to use more thorough but slower search
         };
@@ -144,17 +144,10 @@ class CropRotationOptimizer {
     }
 
     calculateOptimalRotation() {
-        try {
-            // Start the interactive decision tree
-            this.currentGameState = this.getInitialGameState();
-            this.activationHistory = [];
-            return this.getNextOptimalStep();
-        } catch (error) {
-            console.error('Error in calculateOptimalRotation:', error);
-            console.error('Current game state:', this.currentGameState);
-            console.error('Plots configuration:', this.plots);
-            throw new Error(`Optimization failed: ${error.message}. Check console for details.`);
-        }
+        // Start the interactive decision tree
+        this.currentGameState = this.getInitialGameState();
+        this.activationHistory = [];
+        return this.getNextOptimalStep();
     }
 
     getNextOptimalStep() {
