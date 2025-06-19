@@ -596,18 +596,27 @@ class CropRotationOptimizer {
                         </div>
                     </div>
                     
-                    <div class="action-buttons" style="display: flex; gap: 15px; justify-content: center;">
-                        <button onclick="optimizer.processUserInput(true)" class="btn-success" style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                    <div class="action-buttons" style="text-align: center; margin-bottom: 25px;">
+                        <button onclick="optimizer.processUserInput(true)" 
+                                style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
                             ✅ Success (60%)
                         </button>
-                        <button onclick="optimizer.processUserInput(false)" class="btn-failure" style="background: #ff4757; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">
-                            ❌ Failed (40%)
+                        <button onclick="optimizer.processUserInput(false)" 
+                                style="background: #e74c3c; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
+                            ❌ Failure (40%)
                         </button>
                     </div>
                     
                     <p style="text-align: center; margin-top: 15px; font-size: 0.9rem; color: #888;">
                         Try the activation in-game, then click the result above
                     </p>
+                    
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="optimizer.showAlternativeAnalysis()" 
+                                style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;">
+                            📊 Show All Option Scores
+                        </button>
+                    </div>
                 </div>
             `;
         }
@@ -919,6 +928,18 @@ class CropRotationOptimizer {
                             ❌ Failure (40%)
                         </button>
                     </div>
+                    
+                    <p style="text-align: center; margin-top: 15px; font-size: 0.9rem; color: #888;">
+                        Try the activation in-game, then click the result above
+                    </p>
+                    
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="optimizer.showAlternativeAnalysis()" 
+                                style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;">
+                            📊 Show All Option Scores
+                        </button>
+                    </div>
+                </div>
             `;
 
             // Show current field states
