@@ -612,18 +612,33 @@ class CropRotationOptimizer {
             const upgradedColors = this.colors.filter(c => c !== activation.color);
 
             html += `
-                <div class="next-step" style="background: rgba(255, 215, 0, 0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px;">📍 Recommended Next Step:</h4>
-                    <div class="recommended-action" style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                        <div style="font-size: 1.1rem; margin-bottom: 8px;">
-                            <strong>Plot ${activation.plotIndex + 1} - Activate ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong>
+                <div class="optimization-step" style="background: rgba(108, 92, 231, 0.1); border-radius: 12px; padding: 25px;">
+                    <div style="text-align: center; margin-bottom: 25px;">
+                        <h3 style="color: #6c5ce7; margin-bottom: 10px;">
+                            🎯 Next Optimal Move
+                        </h3>
+                        <div style="font-size: 1.1rem; color: #e0e0e0; margin-bottom: 10px;">
+                            Activate <strong>Plot ${activation.plotIndex + 1}</strong> - 
+                            ${this.colorEmojis[activation.color]} <strong>${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)} Field ${activation.fieldIndex + 1}</strong>
                         </div>
-                        <div style="color: #b0b0b0; font-size: 0.9rem;">
-                            Plot contains: ${this.colorEmojis[plot.color1]}/${this.colorEmojis[plot.color2]} • 
-                            Will upgrade: ${upgradedColors.map(c => this.colorEmojis[c] + ' ' + c).join(', ')}
-                        </div>
+                        ${(() => {
+                            // Find the specific field being recommended
+                            const recommendedField = step.currentState.plotFields.find(f => 
+                                f.plotIndex === activation.plotIndex && f.fieldIndex === activation.fieldIndex
+                            );
+                            if (recommendedField) {
+                                return `
+                                    <div style="font-size: 0.9rem; color: #b0b0b0; background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 6px; margin: 10px auto; max-width: 300px;">
+                                        <strong>Target Field:</strong> ${recommendedField.seeds[1]} T1, ${recommendedField.seeds[2]} T2, 
+                                        <span style="color: #ffd700;">${recommendedField.seeds[3]} T3</span>, 
+                                        <span style="color: #ff6b6b;">${recommendedField.seeds[4]} T4</span>
+                                    </div>
+                                `;
+                            }
+                            return '';
+                        })()}
                     </div>
-                    
+
                     <div class="action-buttons" style="text-align: center; margin-bottom: 25px;">
                         <button onclick="optimizer.processUserInput(true)" 
                                 style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1rem; font-weight: 600; margin: 0 10px; cursor: pointer;">
@@ -647,9 +662,66 @@ class CropRotationOptimizer {
                     </div>
                 </div>
             `;
+
+            // Show current field states
+            const totalT3 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[3], 0);
+            const totalT4 = step.currentState.plotFields.reduce((sum, field) => sum + field.seeds[4], 0);
+
+            html += `
+                    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                        <h4 style="color: #ffd700; margin-bottom: 15px;">Current State</h4>
+                        <div style="text-align: center; margin-bottom: 15px; font-size: 1.1rem;">
+                            <span style="color: #ffd700;">Total T3: ${totalT3}</span> | 
+                            <span style="color: #ff6b6b;">Total T4: ${totalT4}</span>
+                        </div>
+                        
+                        <div class="field-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+            `;
+            
+            step.currentState.plotFields.forEach(field => {
+                const isUsed = step.currentState.availablePlots.find(p => p.index === field.plotIndex)?.usedColors.includes(field.color);
+                html += `
+                    <div style="background: rgba(255, 255, 255, ${isUsed ? '0.02' : '0.08'}); border-radius: 6px; padding: 10px; ${isUsed ? 'opacity: 0.5;' : ''}">
+                        <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">
+                            Plot ${field.plotIndex + 1} - ${this.colorEmojis[field.color]} ${this.colorNames[field.color]}
+                            ${isUsed ? ' (Used)' : ''}
+                        </div>
+                        <div style="font-size: 0.8rem;">
+                            T1: ${field.seeds[1]} | T2: ${field.seeds[2]} | 
+                            T3: ${field.seeds[3]} | T4: ${field.seeds[4]}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                        </div>
+                    </div>
+            `;
+
+            // Show computation details if available
+            if (step.computationInfo) {
+                html += `
+                    <div style="background: rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 15px; margin-top: 15px; font-size: 0.9rem; color: #888;">
+                        <strong>Computation Details:</strong> 
+                        Evaluated ${step.computationInfo.sequencesEvaluated} sequences | 
+                        Lookahead: ${step.computationInfo.lookaheadDepth} steps | 
+                        Deep Search: ${step.computationInfo.deepSearch ? 'On' : 'Off'}
+                        ${step.expectedScore ? ` | <span style="color: #ffd700;">Expected Score: ${step.expectedScore.toFixed(1)}</span>` : ''}
+                        <br><br>
+                        <strong>Alternative Options Analysis:</strong>
+                        <div id="alternativeAnalysis" style="margin-top: 10px; font-size: 0.8rem;">
+                            <button onclick="optimizer.showAlternativeAnalysis()" style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
+                                Show All Option Scores
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += `</div>`;
         }
 
-        // Add restart button
         html += `
             <div style="text-align: center; margin-top: 20px;">
                 <button onclick="optimizer.restartOptimization()" class="btn-secondary" style="background: rgba(255, 255, 255, 0.1); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.2); padding: 10px 20px; border-radius: 8px; cursor: pointer;">
@@ -940,10 +1012,26 @@ class CropRotationOptimizer {
                         <h3 style="color: #6c5ce7; margin-bottom: 10px;">
                             🎯 Next Optimal Move
                         </h3>
-                        <div style="font-size: 1.1rem; color: #e0e0e0;">
+                        <div style="font-size: 1.1rem; color: #e0e0e0; margin-bottom: 10px;">
                             Activate <strong>Plot ${activation.plotIndex + 1}</strong> - 
-                            ${this.colorEmojis[activation.color]} <strong>${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}</strong>
+                            ${this.colorEmojis[activation.color]} <strong>${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)} Field ${activation.fieldIndex + 1}</strong>
                         </div>
+                        ${(() => {
+                            // Find the specific field being recommended
+                            const recommendedField = step.currentState.plotFields.find(f => 
+                                f.plotIndex === activation.plotIndex && f.fieldIndex === activation.fieldIndex
+                            );
+                            if (recommendedField) {
+                                return `
+                                    <div style="font-size: 0.9rem; color: #b0b0b0; background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 6px; margin: 10px auto; max-width: 300px;">
+                                        <strong>Target Field:</strong> ${recommendedField.seeds[1]} T1, ${recommendedField.seeds[2]} T2, 
+                                        <span style="color: #ffd700;">${recommendedField.seeds[3]} T3</span>, 
+                                        <span style="color: #ff6b6b;">${recommendedField.seeds[4]} T4</span>
+                                    </div>
+                                `;
+                            }
+                            return '';
+                        })()}
                     </div>
 
                     <div class="action-buttons" style="text-align: center; margin-bottom: 25px;">
