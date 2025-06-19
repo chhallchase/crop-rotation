@@ -237,7 +237,7 @@ class CropRotationOptimizer {
                 activation: activation,
                 bestScore: -1,
                 sequencesEvaluated: 0,
-                plotInfo: `Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}`
+                plotInfo: `Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)} Field ${activation.fieldIndex + 1}`
             });
         }
 
@@ -1367,7 +1367,7 @@ class CropRotationOptimizer {
                 activation: activation,
                 bestScore: -1,
                 sequencesEvaluated: 0,
-                plotInfo: `Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)}`
+                plotInfo: `Plot ${activation.plotIndex + 1} - ${this.colorEmojis[activation.color]} ${activation.color.charAt(0).toUpperCase() + activation.color.slice(1)} Field ${activation.fieldIndex + 1}`
             });
         }
 
