@@ -16,7 +16,7 @@ class CropRotationOptimizer {
         this.computationSettings = {
             lookaheadDepth: 5,           // How many steps ahead to plan (1 = immediate next step only)
             maxSequenceLength: 3,        // Maximum sequence length to consider
-            maxBranchingFactor: 200,      // Max number of sequences to evaluate per step
+            maxBranchingFactor: 2000,      // Max number of sequences to evaluate per step
             probabilityThreshold: 0.01,  // Ignore probability branches below this threshold
             enableDeepSearch: true      // Whether to use more thorough but slower search
         };
@@ -139,9 +139,19 @@ class CropRotationOptimizer {
         
         for (const plot of this.currentGameState.availablePlots) {
             if (plot.active) {
-                // Only add colors that haven't been used yet
-                for (const color of plot.colors) {
-                    if (!plot.usedColors.includes(color)) {
+                // Count how many of each color are available vs used
+                const colorCounts = {};
+                plot.colors.forEach(color => {
+                    colorCounts[color] = (colorCounts[color] || 0) + 1;
+                });
+                
+                // Add activations for colors that still have unused instances
+                for (const color of Object.keys(colorCounts)) {
+                    const totalOfThisColor = colorCounts[color];
+                    const usedOfThisColor = plot.usedColorCounts[color] || 0;
+                    const remainingOfThisColor = totalOfThisColor - usedOfThisColor;
+                    
+                    if (remainingOfThisColor > 0) {
                         availableActivations.push({ plotIndex: plot.index, color: color });
                     }
                 }
@@ -425,7 +435,7 @@ class CropRotationOptimizer {
                 index, 
                 colors: [plot.color1, plot.color2],
                 active: true,
-                usedColors: [] // Track which colors in this plot have been used
+                usedColorCounts: {} // Track count of each color used (e.g., {yellow: 1, red: 0})
             })),
             seedCounts: seedCounts
         };
@@ -485,7 +495,7 @@ class CropRotationOptimizer {
             availablePlots: gameState.availablePlots.map(p => ({ 
                 ...p, 
                 colors: [...p.colors],
-                usedColors: [...p.usedColors]
+                usedColorCounts: { ...p.usedColorCounts }
             })),
             seedCounts: {}
         };
@@ -508,14 +518,26 @@ class CropRotationOptimizer {
         
         // Handle plot survival based on success/failure
         if (success) {
-            // 60% success: mark this specific color as used
-            activatedPlot.usedColors.push(activatedColor);
+            // 60% success: increment count of this specific color used
+            activatedPlot.usedColorCounts[activatedColor] = (activatedPlot.usedColorCounts[activatedColor] || 0) + 1;
             
-            // If all colors in this plot are used, mark plot as inactive
-            const unusedColors = activatedPlot.colors.filter(color => 
-                !activatedPlot.usedColors.includes(color)
-            );
-            if (unusedColors.length === 0) {
+            // Check if all color instances in this plot are used
+            const colorCounts = {};
+            activatedPlot.colors.forEach(color => {
+                colorCounts[color] = (colorCounts[color] || 0) + 1;
+            });
+            
+            let allColorsUsed = true;
+            for (const color of Object.keys(colorCounts)) {
+                const totalOfThisColor = colorCounts[color];
+                const usedOfThisColor = activatedPlot.usedColorCounts[color] || 0;
+                if (usedOfThisColor < totalOfThisColor) {
+                    allColorsUsed = false;
+                    break;
+                }
+            }
+            
+            if (allColorsUsed) {
                 activatedPlot.active = false;
             }
         } else {
